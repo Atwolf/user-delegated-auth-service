@@ -13,8 +13,6 @@ export type TokenExchangeResult = {
 const supervisorBaseUrl = () =>
   (process.env.SUPERVISOR_BASE_URL ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
 
-const isMockSupervisor = () => process.env.SUPERVISOR_BASE_URL === "mock";
-
 async function postSupervisor<TResponse>(
   path: string,
   body: Record<string, unknown>,
@@ -28,7 +26,10 @@ async function postSupervisor<TResponse>(
   });
 
   if (!response.ok) {
-    throw new Error(`${failureMessage} with HTTP ${response.status}`);
+    const detail = await responseErrorDetail(response);
+    throw new Error(
+      `${failureMessage} with HTTP ${response.status}${detail ? `: ${detail}` : ""}`
+    );
   }
 
   return (await response.json()) as TResponse;
@@ -37,17 +38,6 @@ async function postSupervisor<TResponse>(
 export async function exchangeClientCredentials(
   config: Auth0Config
 ): Promise<TokenExchangeResult> {
-  if (isMockSupervisor()) {
-    return {
-      access_token: "mock-access-token",
-      token_type: "Bearer",
-      expires_in: 3600,
-      scope: config.scope,
-      audience: config.audience || null,
-      token_ref: "auth0:mock"
-    };
-  }
-
   return postSupervisor<TokenExchangeResult>(
     "/identity/client-credentials/token",
     {
@@ -67,19 +57,17 @@ export async function exchangeClientCredentials(
 
 export async function planWorkflow(
   question: string,
-  tokenRef: string
+  tokenRef: string,
+  tokenScope: string
 ): Promise<WorkflowRecord> {
-  if (isMockSupervisor()) {
-    return mockWorkflow(question, tokenRef, "awaiting_approval");
-  }
-
   return postSupervisor<WorkflowRecord>(
     "/workflows/plan",
     {
       question,
       user_id: "sample-user",
       session_id: "sample-session",
-      token_ref: tokenRef
+      token_ref: tokenRef,
+      token_scopes: parseScopes(tokenScope)
     },
     "Workflow planning failed"
   );
@@ -90,14 +78,6 @@ export async function approveWorkflow(
   planHash: string,
   tokenRef?: string | null
 ): Promise<WorkflowRecord> {
-  if (isMockSupervisor()) {
-    return {
-      ...mockWorkflow("approved mock workflow", tokenRef ?? "auth0:mock", "completed"),
-      workflow_id: workflowId,
-      plan_hash: planHash
-    };
-  }
-
   return postSupervisor<WorkflowRecord>(
     `/workflows/${workflowId}/approve`,
     {
@@ -110,88 +90,19 @@ export async function approveWorkflow(
   );
 }
 
-function mockWorkflow(
-  question: string,
-  tokenRef: string,
-  status: WorkflowRecord["status"]["status"]
-): WorkflowRecord {
-  const now = new Date().toISOString();
-  const steps = [
-    {
-      step_id: "step-001",
-      target_agent: "planner",
-      action: "propose_workflow_plan",
-      input_model_type: "propose_workflow_plan.arguments",
-      input_payload_json: JSON.stringify({ query: question }),
-      required_scopes: ["DOE.Workflow.plan"],
-      downstream_audience: null,
-      mutates_external_state: false
-    },
-    {
-      step_id: "step-002",
-      target_agent: "identity",
-      action: "get_identity_profile",
-      input_model_type: "get_identity_profile.arguments",
-      input_payload_json: JSON.stringify({ subject_user_id: "sample-user" }),
-      required_scopes: ["DOE.Identity.sample-user"],
-      downstream_audience: null,
-      mutates_external_state: false
-    },
-    {
-      step_id: "step-003",
-      target_agent: "developer",
-      action: "get_developer_app",
-      input_model_type: "get_developer_app.arguments",
-      input_payload_json: JSON.stringify({ appid: "sample-app" }),
-      required_scopes: ["DOE.Developer.sample-app"],
-      downstream_audience: null,
-      mutates_external_state: false
-    }
-  ];
+function parseScopes(scope: string): string[] {
+  return [...new Set(scope.split(/\s+/).map((item) => item.trim()).filter(Boolean))].sort();
+}
 
-  return {
-    workflow_id: "wf-mock",
-    status: { status },
-    plan_hash: "sha256:mock",
-    authorization: {
-      workflow_id: "wf-mock",
-      scopes: [
-        "DOE.Developer.sample-app",
-        "DOE.Identity.sample-user",
-        "DOE.Workflow.plan"
-      ],
-      proposals: []
-    },
-    plan: {
-      workflow_id: "wf-mock",
-      user_id: "sample-user",
-      session_id: "sample-session",
-      created_at: now,
-      steps
-    },
-    events: [
-      {
-        event_type: "workflow.planned",
-        message: "Mock workflow planned.",
-        attributes: { token_ref: tokenRef },
-        created_at: now
-      },
-      {
-        event_type: status === "completed" ? "workflow.completed" : "workflow.awaiting_approval",
-        message: status === "completed" ? "Mock workflow completed." : "Mock workflow awaiting approval.",
-        attributes: {},
-        created_at: now
-      }
-    ],
-    step_results:
-      status === "completed"
-        ? steps.map((step) => ({
-            step_id: step.step_id,
-            target_agent: step.target_agent,
-            action: step.action,
-            status: "completed" as const,
-            output: { deterministic: true }
-          }))
-        : []
-  };
+async function responseErrorDetail(response: Response): Promise<string> {
+  try {
+    const payload = (await response.json()) as unknown;
+    if (payload && typeof payload === "object" && "detail" in payload) {
+      const detail = (payload as { detail?: unknown }).detail;
+      return typeof detail === "string" ? detail : "";
+    }
+  } catch {
+    return "";
+  }
+  return "";
 }

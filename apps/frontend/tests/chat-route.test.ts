@@ -7,7 +7,7 @@ describe("chat route", () => {
     vi.unstubAllGlobals();
   });
 
-  it("exchanges client credentials and plans a workflow with mocked supervisor responses", async () => {
+  it("exchanges client credentials and plans a workflow through supervisor responses", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {

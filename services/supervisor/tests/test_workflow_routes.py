@@ -67,6 +67,61 @@ def test_client_credentials_route_uses_secret_without_persisting_it(monkeypatch,
     assert "client-secret" not in str(payload)
 
 
+def test_client_credentials_route_returns_auth0_error_detail(monkeypatch, tmp_path) -> None:
+    class FakeAuth0ClientCredentialsClient:
+        async def __aenter__(self) -> FakeAuth0ClientCredentialsClient:
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_value: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> None:
+            return None
+
+        async def exchange(
+            self,
+            config: Auth0ClientCredentialsConfig,
+        ) -> Auth0ClientCredentialsTokenResponse:
+            response = httpx.Response(
+                403,
+                json={
+                    "error": "access_denied",
+                    "error_description": "No audience parameter was provided",
+                },
+            )
+            raise httpx.HTTPStatusError(
+                "forbidden",
+                request=httpx.Request("POST", config.token_endpoint),
+                response=response,
+            )
+
+    monkeypatch.setattr(
+        routes,
+        "Auth0ClientCredentialsClient",
+        FakeAuth0ClientCredentialsClient,
+    )
+    app = create_app(SupervisorSettings(subagent_db_path=tmp_path / "subagents.sqlite"))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/identity/client-credentials/token",
+            json={
+                "domain": "samples.auth0.com",
+                "token_endpoint": "https://samples.auth0.com/oauth/token",
+                "jwks_endpoint": "https://samples.auth0.com/.well-known/jwks.json",
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+            },
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == (
+        "Auth0 token exchange failed: access_denied - No audience parameter was provided"
+    )
+
+
 def test_plan_approve_execute_workflow_in_manifest_order(tmp_path) -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         host = request.url.host or ""
@@ -118,6 +173,7 @@ def test_plan_approve_execute_workflow_in_manifest_order(tmp_path) -> None:
                 "user_id": "sample-user",
                 "session_id": "session-1",
                 "token_ref": "auth0:sample",
+                "token_scopes": ["read:workflow", "read:users", "read:apps"],
             },
         )
         assert planned.status_code == 200
@@ -130,9 +186,9 @@ def test_plan_approve_execute_workflow_in_manifest_order(tmp_path) -> None:
             "get_developer_app",
         ]
         assert manifest["authorization"]["scopes"] == [
-            "DOE.Developer.sample-app",
-            "DOE.Identity.sample-user",
-            "DOE.Workflow.plan",
+            "read:apps",
+            "read:users",
+            "read:workflow",
         ]
 
         approved = client.post(

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from base64 import urlsafe_b64decode
+from binascii import Error as Base64DecodeError
 from types import TracebackType
 from typing import Any, cast
 
@@ -40,17 +43,17 @@ class Auth0ClientCredentialsClient:
         response = await self._client.post(config.token_endpoint, data=form_data)
         response.raise_for_status()
         payload = cast(dict[str, Any], response.json())
+        access_token = _required_string(payload, "access_token")
 
-        raw_scope = payload.get("scope")
-        response_scopes = (
-            _parse_scope_string(raw_scope)
-            if isinstance(raw_scope, str) and raw_scope.strip()
-            else config.scopes
+        response_scopes = _scopes_from_response(
+            payload=payload,
+            access_token=access_token,
+            requested_scopes=config.scopes,
         )
 
         expires_in = payload.get("expires_in")
         return Auth0ClientCredentialsTokenResponse.from_access_token(
-            access_token=_required_string(payload, "access_token"),
+            access_token=access_token,
             token_type=_required_string(payload, "token_type"),
             expires_in=expires_in if isinstance(expires_in, int) else None,
             scopes=response_scopes,
@@ -82,3 +85,55 @@ def _required_string(payload: dict[str, Any], key: str) -> str:
 
 def _parse_scope_string(value: str) -> tuple[str, ...]:
     return tuple(scope for scope in value.split(" ") if scope)
+
+
+def _scopes_from_response(
+    *,
+    payload: dict[str, Any],
+    access_token: str,
+    requested_scopes: tuple[str, ...],
+) -> tuple[str, ...]:
+    raw_scope = payload.get("scope")
+    if isinstance(raw_scope, str) and raw_scope.strip():
+        return _parse_scope_string(raw_scope)
+
+    token_scopes = _scopes_from_unverified_jwt(access_token)
+    if token_scopes:
+        return token_scopes
+
+    return requested_scopes
+
+
+def _scopes_from_unverified_jwt(access_token: str) -> tuple[str, ...]:
+    parts = access_token.split(".")
+    if len(parts) < 2:
+        return ()
+
+    try:
+        payload_bytes = urlsafe_b64decode(_with_base64_padding(parts[1]))
+        claims = json.loads(payload_bytes.decode("utf-8"))
+    except (Base64DecodeError, UnicodeError, json.JSONDecodeError):
+        return ()
+
+    if not isinstance(claims, dict):
+        return ()
+
+    claim_values = cast(dict[str, object], claims)
+    scopes: list[str] = []
+    raw_scope = claim_values.get("scope")
+    if isinstance(raw_scope, str) and raw_scope.strip():
+        scopes.extend(_parse_scope_string(raw_scope))
+
+    raw_permissions = claim_values.get("permissions")
+    if isinstance(raw_permissions, list):
+        permissions = cast(list[object], raw_permissions)
+        scopes.extend(
+            permission for permission in permissions if isinstance(permission, str)
+        )
+
+    return tuple(dict.fromkeys(scope.strip() for scope in scopes if scope.strip()))
+
+
+def _with_base64_padding(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return f"{value}{padding}".encode("ascii")

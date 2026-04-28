@@ -25,7 +25,7 @@ export const DEFAULT_AUTH0_CONFIG: Auth0PublicConfig = {
   tokenEndpoint: "https://samples.auth0.com/oauth/token",
   jwksEndpoint: "https://samples.auth0.com/.well-known/jwks.json",
   clientId: "",
-  scope: "openid profile email",
+  scope: "",
   audience: ""
 };
 
@@ -122,7 +122,6 @@ export function validateAuth0Config(config: Auth0Config): ValidationResult {
   }
   if (!config.clientId.trim()) errors.clientId = "Client ID is required.";
   if (!config.clientSecret.trim()) errors.clientSecret = "Client secret is required.";
-  if (!config.scope.trim()) errors.scope = "At least one scope is required.";
 
   return {
     valid: Object.keys(errors).length === 0,

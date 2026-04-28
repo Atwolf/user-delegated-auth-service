@@ -55,6 +55,12 @@ class WorkflowPlanRequest(BaseModel):
     tenant_id: str | None = Field(default=None, min_length=1)
     auth_context_ref: str | None = Field(default=None, min_length=1)
     token_ref: str | None = Field(default=None, min_length=1)
+    token_scopes: list[str] = Field(default_factory=list)
+
+    @field_validator("token_scopes")
+    @classmethod
+    def _normalize_token_scopes(cls, value: list[str]) -> list[str]:
+        return sorted({scope.strip() for scope in value if scope.strip()})
 
 
 class WorkflowApprovalRequest(BaseModel):

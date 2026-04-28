@@ -9,7 +9,7 @@ const workflow: WorkflowRecord = {
   plan_hash: "sha256:abc",
   authorization: {
     workflow_id: "wf-123",
-    scopes: ["DOE.Identity.sample-user"],
+    scopes: ["read:users"],
     proposals: [
       {
         agent_name: "identity",
@@ -31,7 +31,7 @@ const workflow: WorkflowRecord = {
         action: "get_identity_profile",
         input_model_type: "get_identity_profile.arguments",
         input_payload_json: JSON.stringify({ subject_user_id: "sample-user" }),
-        required_scopes: ["DOE.Identity.sample-user"],
+        required_scopes: ["read:users"],
         mutates_external_state: false
       }
     ]
@@ -47,7 +47,7 @@ describe("ApprovalCard", () => {
 
     expect(screen.getByTestId("approval-card")).toBeInTheDocument();
     expect(screen.getByText(/get_identity_profile/)).toBeInTheDocument();
-    expect(screen.getAllByText("DOE.Identity.sample-user")).toHaveLength(2);
+    expect(screen.getAllByText("read:users")).toHaveLength(2);
 
     fireEvent.click(screen.getByRole("button", { name: /approve workflow/i }));
     expect(onApprove).toHaveBeenCalledTimes(1);

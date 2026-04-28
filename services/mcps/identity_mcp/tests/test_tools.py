@@ -7,8 +7,8 @@ def test_identity_tool_declares_workflow_authz_metadata() -> None:
     metadata = get_workflow_authz(get_identity_profile)
 
     assert metadata == {
-        "scopes": ["DOE.Identity.{subject_user_id}"],
-        "scope_args": ["subject_user_id"],
+        "scopes": ["read:identity", "read:users", "profile", "email"],
+        "scope_args": [],
         "op": "READ",
         "hitl": "Read identity profile for selected user ID",
     }

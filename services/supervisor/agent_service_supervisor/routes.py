@@ -21,6 +21,7 @@ from workflow_core import (
     WorkflowStep,
     materialize_scopes_for_proposal,
     plan_hash,
+    scope_requirements_for_auth0_token,
     scope_requirements_for_tool,
 )
 
@@ -134,7 +135,7 @@ async def exchange_client_credentials_token(
         except httpx.HTTPStatusError as exc:
             raise HTTPException(
                 status_code=exc.response.status_code,
-                detail="Auth0 token exchange failed",
+                detail=_auth0_error_detail(exc.response),
             ) from exc
         except (httpx.HTTPError, ValueError) as exc:
             raise HTTPException(status_code=502, detail="Auth0 token exchange failed") from exc
@@ -181,7 +182,10 @@ async def plan_workflow(
             subagents=subagents,
         )
     ]
-    steps = [_step_from_proposal(index, proposal) for index, proposal in enumerate(proposals, 1)]
+    steps = [
+        _step_from_proposal(index, proposal, request.token_scopes)
+        for index, proposal in enumerate(proposals, 1)
+    ]
     plan = WorkflowPlan(
         workflow_id=workflow_id,
         user_id=request.user_id,
@@ -205,7 +209,11 @@ async def plan_workflow(
             WorkflowTimelineEvent(
                 event_type="workflow.planned",
                 message="Supervisor planned a workflow manifest from subagent proposals.",
-                attributes={"proposal_count": len(proposals), "token_ref": request.token_ref},
+                attributes={
+                    "proposal_count": len(proposals),
+                    "token_ref": request.token_ref,
+                    "issued_scope_count": len(request.token_scopes),
+                },
             ),
             WorkflowTimelineEvent(
                 event_type="workflow.awaiting_approval",
@@ -224,7 +232,11 @@ async def plan_workflow(
         tenant_id=request.tenant_id,
         workflow_id=workflow_id,
         plan_hash=hashed_plan,
-        attributes={"proposal_count": len(proposals), "token_ref": request.token_ref},
+        attributes={
+            "proposal_count": len(proposals),
+            "token_ref": request.token_ref,
+            "issued_scope_count": len(request.token_scopes),
+        },
     )
     await _emit_sidecar_event(
         settings=settings,
@@ -311,8 +323,12 @@ def _require_workflow(store: WorkflowStore, workflow_id: str) -> WorkflowRecord:
     return record
 
 
-def _step_from_proposal(index: int, proposal: ToolProposal) -> WorkflowStep:
-    required_scopes = _required_scopes(proposal)
+def _step_from_proposal(
+    index: int,
+    proposal: ToolProposal,
+    token_scopes: list[str],
+) -> WorkflowStep:
+    required_scopes = _required_scopes(proposal, token_scopes)
     return WorkflowStep(
         step_id=f"step-{index:03d}",
         target_agent=proposal.agent_name,
@@ -327,8 +343,12 @@ def _step_from_proposal(index: int, proposal: ToolProposal) -> WorkflowStep:
     )
 
 
-def _required_scopes(proposal: ToolProposal) -> list[str]:
-    requirements = scope_requirements_for_tool(proposal.tool_name)
+def _required_scopes(proposal: ToolProposal, token_scopes: list[str]) -> list[str]:
+    requirements = (
+        scope_requirements_for_auth0_token(proposal.tool_name, token_scopes)
+        if token_scopes
+        else scope_requirements_for_tool(proposal.tool_name)
+    )
     try:
         return materialize_scopes_for_proposal(proposal, requirements)
     except ScopeMaterializationError:
@@ -479,3 +499,26 @@ async def _emit_sidecar_event(
             )
     except httpx.HTTPError:
         return
+
+
+def _auth0_error_detail(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return "Auth0 token exchange failed"
+
+    if not isinstance(payload, dict):
+        return "Auth0 token exchange failed"
+
+    error_payload = cast(dict[str, object], payload)
+    error = error_payload.get("error")
+    description = error_payload.get("error_description")
+    details = [
+        item
+        for item in (error, description)
+        if isinstance(item, str) and item.strip()
+    ]
+    if not details:
+        return "Auth0 token exchange failed"
+
+    return "Auth0 token exchange failed: " + " - ".join(details)

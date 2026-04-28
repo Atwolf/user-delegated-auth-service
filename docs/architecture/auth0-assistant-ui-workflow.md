@@ -39,11 +39,12 @@ fields before telemetry is stored or returned.
 
 ## Shared Workflow Runtime
 
-- MCP services use the shared `mcp_runtime` package for FastMCP imports, runtime scope
-  requirements, and workflow authorization metadata.
+- MCP services use the shared `mcp_runtime` package for FastMCP imports, Auth0-compatible
+  runtime scope checks, and workflow authorization metadata.
 - Sample tool authorization metadata is centralized in `workflow_core.tool_catalog`; the
-  supervisor uses the same catalog as the MCP tool declarations when materializing workflow
-  scopes.
+  supervisor adapts required workflow scopes to the scopes actually returned by Auth0.
+- The token broker prefers Auth0's top-level `scope` response and falls back to the access
+  token's `scope` or `permissions` claims before using requested scopes.
 - Session/workflow persistence reuses canonical workflow models from `workflow_core`, so stored
   workflow snapshots match the manifest shape returned by supervisor APIs.
 - Frontend supervisor calls use one shared POST helper for JSON requests, `no-store` fetches,
@@ -63,8 +64,9 @@ Open:
 - Supervisor: `http://127.0.0.1:8080`
 - Sidecar telemetry: `http://127.0.0.1:4319/v1/telemetry`
 
-The Compose stack includes `auth0-mock`, which accepts Client Credentials form posts at
-`http://auth0-mock:8099/oauth/token` from inside the service network.
+The Compose stack uses the configured Auth0 token endpoint. It does not include a mock identity
+provider. It also omits the unused Temporal placeholder; durable Temporal-backed workflow
+execution remains future work.
 
 For real Auth0 Client Credentials exchanges, `audience` must be set to an Auth0 API Identifier
 unless the tenant has a default audience configured. A missing audience returns Auth0

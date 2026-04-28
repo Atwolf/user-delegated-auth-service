@@ -25,7 +25,9 @@ from workflow_core.tool_catalog import (
     TOOL_AUTHORIZATION_CATALOG,
     ToolAuthorizationSpec,
     get_tool_authorization,
+    scope_requirements_for_auth0_token,
     scope_requirements_for_tool,
+    select_auth0_scopes_for_tool,
 )
 
 __all__ = [
@@ -49,6 +51,8 @@ __all__ = [
     "materialize_scopes_for_proposal",
     "plan_hash",
     "restricted",
+    "scope_requirements_for_auth0_token",
     "scope_requirements_for_tool",
+    "select_auth0_scopes_for_tool",
     "scope_requirements_from_callable",
 ]

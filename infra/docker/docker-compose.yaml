@@ -7,14 +7,11 @@ services:
       SUBAGENT_DB_PATH: /data/supervisor/subagents.sqlite
       OBSERVABILITY_SIDECAR_URL: http://observability-sidecar:4319
       REDIS_URL: redis://redis:6379/0
-      TEMPORAL_ADDRESS: temporal:7233
     volumes:
       - ../../data/supervisor:/data/supervisor
     depends_on:
       - observability-sidecar
-      - auth0-mock
       - redis
-      - temporal
     ports:
       - "8080:8080"
 
@@ -36,13 +33,6 @@ services:
       dockerfile: services/observability_sidecar/Dockerfile
     ports:
       - "4319:4319"
-
-  auth0-mock:
-    build:
-      context: ../..
-      dockerfile: services/identity_provider_mock/Dockerfile
-    expose:
-      - "8099"
 
   planner-agent:
     build:
@@ -99,8 +89,3 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
-
-  temporal:
-    image: temporalio/auto-setup:latest
-    ports:
-      - "7233:7233"

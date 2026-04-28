@@ -43,7 +43,7 @@ export async function POST(req: Request) {
 
         try {
           const token = await exchangeClientCredentials(config);
-          const workflow = await planWorkflow(question, token.token_ref);
+          const workflow = await planWorkflow(question, token.token_ref, token.scope);
           rememberWorkflow(workflow);
           writer.write({
             type: "text-delta",

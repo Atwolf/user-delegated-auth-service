@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from base64 import urlsafe_b64encode
 from urllib.parse import parse_qs
 
 import httpx
@@ -82,3 +84,77 @@ async def test_auth0_response_falls_back_to_requested_scopes_when_scope_missing(
     assert response.scopes == ("read:reports",)
 
     await http_client.aclose()
+
+
+async def test_auth0_response_uses_access_token_scope_claim_when_scope_missing() -> None:
+    token = _unsigned_jwt({"scope": "read:users read:apps"})
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "access_token": token,
+                "token_type": "Bearer",
+                "expires_in": 60,
+            },
+        )
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = Auth0ClientCredentialsClient(client=http_client)
+    config = Auth0ClientCredentialsConfig(
+        domain="samples.auth0.com",
+        token_endpoint="https://samples.auth0.com/oauth/token",
+        jwks_endpoint="https://samples.auth0.com/.well-known/jwks.json",
+        client_id="client-id",
+        client_secret="client-secret",
+        scopes=[],
+        audience="https://api.example.test",
+    )
+
+    response = await client.exchange(config)
+
+    assert response.scopes == ("read:users", "read:apps")
+
+    await http_client.aclose()
+
+
+async def test_auth0_response_uses_access_token_permissions_when_scope_missing() -> None:
+    token = _unsigned_jwt({"permissions": ["read:billing", "read:accounts"]})
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "access_token": token,
+                "token_type": "Bearer",
+                "expires_in": 60,
+            },
+        )
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = Auth0ClientCredentialsClient(client=http_client)
+    config = Auth0ClientCredentialsConfig(
+        domain="samples.auth0.com",
+        token_endpoint="https://samples.auth0.com/oauth/token",
+        jwks_endpoint="https://samples.auth0.com/.well-known/jwks.json",
+        client_id="client-id",
+        client_secret="client-secret",
+        scopes=[],
+        audience="https://api.example.test",
+    )
+
+    response = await client.exchange(config)
+
+    assert response.scopes == ("read:billing", "read:accounts")
+
+    await http_client.aclose()
+
+
+def _unsigned_jwt(claims: dict[str, object]) -> str:
+    header = _base64url({"alg": "none", "typ": "JWT"})
+    payload = _base64url(claims)
+    return f"{header}.{payload}.signature"
+
+
+def _base64url(payload: dict[str, object]) -> str:
+    return urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii").rstrip("=")

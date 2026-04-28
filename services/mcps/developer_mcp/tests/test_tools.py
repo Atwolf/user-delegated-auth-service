@@ -7,8 +7,8 @@ def test_developer_tool_declares_workflow_authz_metadata() -> None:
     metadata = get_workflow_authz(get_developer_app)
 
     assert metadata == {
-        "scopes": ["DOE.Developer.{appid}"],
-        "scope_args": ["appid"],
+        "scopes": ["read:developer_apps", "read:apps", "read:developer"],
+        "scope_args": [],
         "op": "READ",
         "hitl": "Read developer app metadata for selected app ID",
     }

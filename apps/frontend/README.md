@@ -7,8 +7,8 @@ The app stores only non-secret Auth0 configuration in localStorage. The client s
 in memory and is never written to localStorage by the sample.
 
 Supervisor API calls are routed through a small shared client helper in `lib/server/supervisor`.
-It preserves the `SUPERVISOR_BASE_URL=mock` path used by frontend tests and keeps HTTP error
-handling consistent across token exchange, planning, and approval.
+All token exchange, planning, and approval calls go to the configured supervisor endpoint; there
+is no frontend mock workflow branch.
 
 ## Run Locally
 
@@ -23,12 +23,6 @@ Set `SUPERVISOR_BASE_URL` when using a non-default supervisor endpoint:
 SUPERVISOR_BASE_URL=http://127.0.0.1:8080 npm run dev
 ```
 
-For isolated UI testing without backend services:
-
-```bash
-SUPERVISOR_BASE_URL=mock npm run dev
-```
-
 ## Tests
 
 ```bash
@@ -37,3 +31,6 @@ npm run lint
 npm run build
 npm run test:e2e
 ```
+
+`npm run test:e2e` exercises the real supervisor/Auth0 flow. It requires `AUTH0_CLIENT_ID`,
+`AUTH0_CLIENT_SECRET`, and `AUTH0_AUDIENCE` in the environment or root `.env`.
