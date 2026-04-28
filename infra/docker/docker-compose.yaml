@@ -1,0 +1,106 @@
+services:
+  supervisor:
+    build:
+      context: ../..
+      dockerfile: services/supervisor/Dockerfile
+    environment:
+      SUBAGENT_DB_PATH: /data/supervisor/subagents.sqlite
+      OBSERVABILITY_SIDECAR_URL: http://observability-sidecar:4319
+      REDIS_URL: redis://redis:6379/0
+      TEMPORAL_ADDRESS: temporal:7233
+    volumes:
+      - ../../data/supervisor:/data/supervisor
+    depends_on:
+      - observability-sidecar
+      - auth0-mock
+      - redis
+      - temporal
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: apps/frontend/Dockerfile
+    environment:
+      SUPERVISOR_BASE_URL: http://supervisor:8080
+      NEXT_PUBLIC_SIDECAR_URL: http://localhost:4319/v1/telemetry
+    ports:
+      - "3000:3000"
+    depends_on:
+      - supervisor
+
+  observability-sidecar:
+    build:
+      context: ../..
+      dockerfile: services/observability_sidecar/Dockerfile
+    ports:
+      - "4319:4319"
+
+  auth0-mock:
+    build:
+      context: ../..
+      dockerfile: services/identity_provider_mock/Dockerfile
+    expose:
+      - "8099"
+
+  planner-agent:
+    build:
+      context: ../..
+      dockerfile: services/agents/planner/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - observability-sidecar
+      - redis
+
+  authorizer-agent:
+    build:
+      context: ../..
+      dockerfile: services/agents/authorizer/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - observability-sidecar
+      - redis
+
+  executor-agent:
+    build:
+      context: ../..
+      dockerfile: services/agents/executor/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - observability-sidecar
+      - redis
+
+  developer-mcp:
+    build:
+      context: ../..
+      dockerfile: services/mcps/developer_mcp/Dockerfile
+    expose:
+      - "8001"
+
+  billing-mcp:
+    build:
+      context: ../..
+      dockerfile: services/mcps/billing_mcp/Dockerfile
+    expose:
+      - "8002"
+
+  identity-mcp:
+    build:
+      context: ../..
+      dockerfile: services/mcps/identity_mcp/Dockerfile
+    expose:
+      - "8003"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  temporal:
+    image: temporalio/auto-setup:latest
+    ports:
+      - "7233:7233"

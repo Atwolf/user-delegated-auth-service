@@ -1,0 +1,16 @@
+.git
+.venv
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.pyright
+__pycache__
+*.py[cod]
+*.egg-info
+apps/frontend/.next
+apps/frontend/node_modules
+apps/frontend/test-results
+worktrees
+data/supervisor/*.sqlite
+data/supervisor/*.sqlite-shm
+data/supervisor/*.sqlite-wal

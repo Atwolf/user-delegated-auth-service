@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-service-supervisor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agent-service-supervisor
+  template:
+    metadata:
+      labels:
+        app: agent-service-supervisor
+    spec:
+      containers:
+        - name: supervisor
+          image: agent-service-supervisor:latest
+          envFrom:
+            - configMapRef:
+                name: agent-service-config
+          volumeMounts:
+            - name: supervisor-data
+              mountPath: /data/supervisor
+          ports:
+            - containerPort: 8080
+        - name: observability-sidecar
+          image: agent-service-observability-sidecar:latest
+          ports:
+            - containerPort: 4319
+      volumes:
+        - name: supervisor-data
+          persistentVolumeClaim:
+            claimName: supervisor-subagent-db
