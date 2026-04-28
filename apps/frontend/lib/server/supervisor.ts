@@ -15,6 +15,25 @@ const supervisorBaseUrl = () =>
 
 const isMockSupervisor = () => process.env.SUPERVISOR_BASE_URL === "mock";
 
+async function postSupervisor<TResponse>(
+  path: string,
+  body: Record<string, unknown>,
+  failureMessage: string
+): Promise<TResponse> {
+  const response = await fetch(`${supervisorBaseUrl()}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`${failureMessage} with HTTP ${response.status}`);
+  }
+
+  return (await response.json()) as TResponse;
+}
+
 export async function exchangeClientCredentials(
   config: Auth0Config
 ): Promise<TokenExchangeResult> {
@@ -29,10 +48,9 @@ export async function exchangeClientCredentials(
     };
   }
 
-  const response = await fetch(`${supervisorBaseUrl()}/identity/client-credentials/token`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
+  return postSupervisor<TokenExchangeResult>(
+    "/identity/client-credentials/token",
+    {
       domain: config.domain,
       token_endpoint: config.tokenEndpoint,
       jwks_endpoint: config.jwksEndpoint,
@@ -42,15 +60,9 @@ export async function exchangeClientCredentials(
       audience: config.audience || null,
       user_id: "sample-user",
       session_id: "sample-session"
-    }),
-    cache: "no-store"
-  });
-
-  if (!response.ok) {
-    throw new Error(`Token exchange failed with HTTP ${response.status}`);
-  }
-
-  return (await response.json()) as TokenExchangeResult;
+    },
+    "Token exchange failed"
+  );
 }
 
 export async function planWorkflow(
@@ -61,23 +73,16 @@ export async function planWorkflow(
     return mockWorkflow(question, tokenRef, "awaiting_approval");
   }
 
-  const response = await fetch(`${supervisorBaseUrl()}/workflows/plan`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
+  return postSupervisor<WorkflowRecord>(
+    "/workflows/plan",
+    {
       question,
       user_id: "sample-user",
       session_id: "sample-session",
       token_ref: tokenRef
-    }),
-    cache: "no-store"
-  });
-
-  if (!response.ok) {
-    throw new Error(`Workflow planning failed with HTTP ${response.status}`);
-  }
-
-  return (await response.json()) as WorkflowRecord;
+    },
+    "Workflow planning failed"
+  );
 }
 
 export async function approveWorkflow(
@@ -93,23 +98,16 @@ export async function approveWorkflow(
     };
   }
 
-  const response = await fetch(`${supervisorBaseUrl()}/workflows/${workflowId}/approve`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
+  return postSupervisor<WorkflowRecord>(
+    `/workflows/${workflowId}/approve`,
+    {
       approved: true,
       approved_by_user_id: "sample-user",
       plan_hash: planHash,
       token_ref: tokenRef ?? null
-    }),
-    cache: "no-store"
-  });
-
-  if (!response.ok) {
-    throw new Error(`Workflow approval failed with HTTP ${response.status}`);
-  }
-
-  return (await response.json()) as WorkflowRecord;
+    },
+    "Workflow approval failed"
+  );
 }
 
 function mockWorkflow(

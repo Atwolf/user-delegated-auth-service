@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from agent_runtime import create_agent_app
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -22,12 +22,7 @@ class ExecuteStepResponse(BaseModel):
     result: dict[str, object] = Field(default_factory=dict)
 
 
-app = FastAPI(title="executor-agent")
-
-
-@app.get("/healthz")
-async def healthz() -> dict[str, str]:
-    return {"status": "ok"}
+app = create_agent_app("executor-agent")
 
 
 @app.post("/execute", response_model=ExecuteStepResponse)

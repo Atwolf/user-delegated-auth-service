@@ -15,13 +15,13 @@ from workflow_core import (
     ApprovedWorkflow,
     AuthorizationBundle,
     ScopeMaterializationError,
-    ScopeRequirement,
     ToolProposal,
     WorkflowPlan,
     WorkflowStatus,
     WorkflowStep,
     materialize_scopes_for_proposal,
     plan_hash,
+    scope_requirements_for_tool,
 )
 
 from agent_service_supervisor.config import SupervisorSettings
@@ -328,58 +328,11 @@ def _step_from_proposal(index: int, proposal: ToolProposal) -> WorkflowStep:
 
 
 def _required_scopes(proposal: ToolProposal) -> list[str]:
-    requirements = _scope_requirements_for_tool(proposal.tool_name)
+    requirements = scope_requirements_for_tool(proposal.tool_name)
     try:
         return materialize_scopes_for_proposal(proposal, requirements)
     except ScopeMaterializationError:
         return []
-
-
-def _scope_requirements_for_tool(tool_name: str) -> list[ScopeRequirement]:
-    if tool_name == "get_identity_profile":
-        return [
-            ScopeRequirement(
-                scope_template="DOE.Identity.{subject_user_id}",
-                scope_args=["subject_user_id"],
-                op="READ",
-                hitl_description="Read identity profile for selected user ID",
-            )
-        ]
-    if tool_name == "get_developer_app":
-        return [
-            ScopeRequirement(
-                scope_template="DOE.Developer.{appid}",
-                scope_args=["appid"],
-                op="READ",
-                hitl_description="Read developer app metadata for selected app ID",
-            )
-        ]
-    if tool_name == "get_account_balance":
-        return [
-            ScopeRequirement(
-                scope_template="DOE.Billing.{account_id}",
-                scope_args=["account_id"],
-                op="READ",
-                hitl_description="Read billing balance for selected account ID",
-            )
-        ]
-    if tool_name == "propose_workflow_plan":
-        return [
-            ScopeRequirement(
-                scope_template="DOE.Workflow.plan",
-                scope_args=[],
-                op="READ",
-                hitl_description="Review the user request and propose workflow steps",
-            )
-        ]
-    return [
-        ScopeRequirement(
-            scope_template="DOE.Workflow.inspect",
-            scope_args=[],
-            op="READ",
-            hitl_description="Inspect the user request for workflow planning",
-        )
-    ]
 
 
 async def _execute_workflow(

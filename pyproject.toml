@@ -33,6 +33,7 @@ build-backend = "setuptools.build_meta"
 where = [
     "packages/a2a_runtime",
     "packages/agent_runtime",
+    "packages/mcp_runtime",
     "packages/observability",
     "packages/session_state",
     "packages/token_broker",
@@ -56,6 +57,7 @@ include = [
     "executor_agent*",
     "identity_provider_mock*",
     "identity_mcp*",
+    "mcp_runtime*",
     "observability*",
     "observability_sidecar*",
     "planner_agent*",
@@ -71,6 +73,7 @@ asyncio_mode = "auto"
 pythonpath = [
     "packages/a2a_runtime",
     "packages/agent_runtime",
+    "packages/mcp_runtime",
     "packages/observability",
     "packages/session_state",
     "packages/token_broker",
@@ -104,6 +107,7 @@ strict = true
 mypy_path = [
     "packages/a2a_runtime",
     "packages/agent_runtime",
+    "packages/mcp_runtime",
     "packages/observability",
     "packages/session_state",
     "packages/token_broker",
@@ -147,6 +151,7 @@ reportUnusedFunction = "none"
 extraPaths = [
     "packages/a2a_runtime",
     "packages/agent_runtime",
+    "packages/mcp_runtime",
     "packages/observability",
     "packages/session_state",
     "packages/token_broker",

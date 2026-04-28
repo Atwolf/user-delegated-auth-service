@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from agent_runtime import create_agent_app
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -19,12 +19,7 @@ class AuthorizationGateResponse(BaseModel):
     approved_scopes: list[str] = Field(default_factory=list)
 
 
-app = FastAPI(title="authorizer-agent")
-
-
-@app.get("/healthz")
-async def healthz() -> dict[str, str]:
-    return {"status": "ok"}
+app = create_agent_app("authorizer-agent")
 
 
 @app.post("/authorize", response_model=AuthorizationGateResponse)

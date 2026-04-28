@@ -6,6 +6,10 @@ the supervisor workflow.
 The app stores only non-secret Auth0 configuration in localStorage. The client secret is kept
 in memory and is never written to localStorage by the sample.
 
+Supervisor API calls are routed through a small shared client helper in `lib/server/supervisor`.
+It preserves the `SUPERVISOR_BASE_URL=mock` path used by frontend tests and keeps HTTP error
+handling consistent across token exchange, planning, and approval.
+
 ## Run Locally
 
 ```bash

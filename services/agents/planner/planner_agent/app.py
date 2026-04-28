@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from agent_runtime import create_agent_app
 from pydantic import BaseModel, ConfigDict, Field
 from workflow_core import ToolProposal
 
@@ -19,12 +19,7 @@ class CapabilityResponse(BaseModel):
     proposals: list[ToolProposal] = Field(default_factory=list[ToolProposal])
 
 
-app = FastAPI(title="planner-agent")
-
-
-@app.get("/healthz")
-async def healthz() -> dict[str, str]:
-    return {"status": "ok"}
+app = create_agent_app("planner-agent")
 
 
 @app.post("/capabilities", response_model=CapabilityResponse)

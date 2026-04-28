@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Protocol, TypeVar
+from typing import Protocol, TypeVar
 
 from pydantic import BaseModel
+from redis.exceptions import WatchError as RedisWatchError
 
 from .interfaces import SessionIdentity, SessionStateStore, WorkflowEventLike
 from .key_builder import (
@@ -15,15 +16,6 @@ from .key_builder import (
     build_workflow_key,
 )
 from .models import SessionState, WorkflowState
-
-if TYPE_CHECKING:
-    from redis.exceptions import WatchError as RedisWatchError
-else:
-    try:  # pragma: no cover - exercised only when redis is installed.
-        from redis.exceptions import WatchError as RedisWatchError
-    except Exception:  # pragma: no cover - keeps imports working without redis.
-        RedisWatchError = RuntimeError
-
 
 StateModelT = TypeVar("StateModelT", bound=BaseModel)
 

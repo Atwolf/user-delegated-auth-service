@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from agent_runtime import AgentRuntimeSettings
 
 
-class AuthorizerSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class AuthorizerSettings(AgentRuntimeSettings):
     agent_name: str = "authorizer"

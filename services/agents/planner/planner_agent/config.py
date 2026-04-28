@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from agent_runtime import AgentRuntimeSettings
 
 
-class PlannerSettings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class PlannerSettings(AgentRuntimeSettings):
     agent_name: str = "planner"

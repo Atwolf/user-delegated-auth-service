@@ -37,6 +37,18 @@ The supervisor emits both traces and logs to the observability sidecar for:
 Sidecar redaction covers client secrets, access tokens, authorization headers, and token-like
 fields before telemetry is stored or returned.
 
+## Shared Workflow Runtime
+
+- MCP services use the shared `mcp_runtime` package for FastMCP imports, runtime scope
+  requirements, and workflow authorization metadata.
+- Sample tool authorization metadata is centralized in `workflow_core.tool_catalog`; the
+  supervisor uses the same catalog as the MCP tool declarations when materializing workflow
+  scopes.
+- Session/workflow persistence reuses canonical workflow models from `workflow_core`, so stored
+  workflow snapshots match the manifest shape returned by supervisor APIs.
+- Frontend supervisor calls use one shared POST helper for JSON requests, `no-store` fetches,
+  and consistent HTTP error messages.
+
 ## Local Compose Verification
 
 Run:
