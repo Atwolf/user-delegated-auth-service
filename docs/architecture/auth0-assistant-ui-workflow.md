@@ -66,6 +66,10 @@ Open:
 The Compose stack includes `auth0-mock`, which accepts Client Credentials form posts at
 `http://auth0-mock:8099/oauth/token` from inside the service network.
 
+For real Auth0 Client Credentials exchanges, `audience` must be set to an Auth0 API Identifier
+unless the tenant has a default audience configured. A missing audience returns Auth0
+`access_denied` with HTTP 403 before workflow planning can proceed.
+
 ## Verification Gates
 
 Backend:
