@@ -12,6 +12,7 @@ def test_redaction_catches_nested_sensitive_keys() -> None:
         },
         "nested": {
             "access_token": "raw-access-token",
+            "AUTH0_MANAGEMENT_CLIENT_SECRET": "raw-management-secret",
             "clientSecret": "raw-client-secret",
             "items": [
                 {"password": "raw-password", "safe_value": "kept"},
@@ -26,6 +27,7 @@ def test_redaction_catches_nested_sensitive_keys() -> None:
     assert redacted["headers"]["Authorization"] == REDACTED
     assert redacted["headers"]["X-API-Key"] == REDACTED
     assert redacted["nested"]["access_token"] == REDACTED
+    assert redacted["nested"]["AUTH0_MANAGEMENT_CLIENT_SECRET"] == REDACTED
     assert redacted["nested"]["clientSecret"] == REDACTED
     assert redacted["nested"]["items"][0]["password"] == REDACTED
     assert redacted["nested"]["items"][0]["safe_value"] == "kept"

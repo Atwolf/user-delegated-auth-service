@@ -12,8 +12,8 @@ _GET_ACCOUNT_BALANCE_AUTHZ = get_tool_authorization("get_account_balance")
 
 
 @restricted(
-    scopes=list(_GET_ACCOUNT_BALANCE_AUTHZ.auth0_scope_candidates),
-    args=None,
+    scopes=list(_GET_ACCOUNT_BALANCE_AUTHZ.workflow_scope_templates),
+    args=list(_GET_ACCOUNT_BALANCE_AUTHZ.scope_args),
     op=_GET_ACCOUNT_BALANCE_AUTHZ.op,
     hitl=_GET_ACCOUNT_BALANCE_AUTHZ.hitl_description,
 )

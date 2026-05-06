@@ -12,8 +12,8 @@ _GET_IDENTITY_PROFILE_AUTHZ = get_tool_authorization("get_identity_profile")
 
 
 @restricted(
-    scopes=list(_GET_IDENTITY_PROFILE_AUTHZ.auth0_scope_candidates),
-    args=None,
+    scopes=list(_GET_IDENTITY_PROFILE_AUTHZ.workflow_scope_templates),
+    args=list(_GET_IDENTITY_PROFILE_AUTHZ.scope_args),
     op=_GET_IDENTITY_PROFILE_AUTHZ.op,
     hitl=_GET_IDENTITY_PROFILE_AUTHZ.hitl_description,
 )

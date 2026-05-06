@@ -1,28 +1,26 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/chat/route";
-import { DEFAULT_AUTH0_CONFIG, encodeAuth0ConfigHeader } from "@/lib/auth0-config";
+import {
+  AUTH0_SESSION_COOKIE,
+  createSignedCookieValue
+} from "@/lib/server/auth0-session";
 
 describe("chat route", () => {
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
 
-  it("exchanges client credentials and plans a workflow through supervisor responses", async () => {
+  it("plans a workflow from an active Auth0 user session", async () => {
+    vi.stubEnv("AUTH0_SESSION_SECRET", "x".repeat(32));
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
-        if (url.endsWith("/identity/client-credentials/token")) {
-          return Response.json({
-            access_token: "issued-access-token",
-            token_type: "Bearer",
-            expires_in: 3600,
-            scope: "openid profile",
-            audience: null,
-            token_ref: "auth0:sample"
-          });
-        }
         if (url.endsWith("/workflows/plan")) {
+          expect(JSON.parse(String(init?.body))).toMatchObject({
+            allowed_tools: ["get_developer_app", "get_identity_profile"]
+          });
           return Response.json({
             workflow_id: "wf-123",
             status: { status: "awaiting_approval" },
@@ -43,17 +41,31 @@ describe("chat route", () => {
       })
     );
 
-    const header = encodeAuth0ConfigHeader({
-      ...DEFAULT_AUTH0_CONFIG,
-      clientId: "client-id",
-      clientSecret: "client-secret"
-    });
+    const cookieValue = createSignedCookieValue(
+      {
+        sessionId: "auth0-session-1",
+        tokenRef: "auth0:sample",
+        scope: "read:users read:apps",
+        audience: "https://api.example.test",
+        expiresAt: Date.now() + 3600_000,
+        userId: "auth0|user-1",
+        userEmail: "sample@example.com",
+        allowedTools: ["get_identity_profile", "get_developer_app"],
+        persona: {
+          displayName: "sample",
+          headline: "sample is cleared for 2 workflow tools.",
+          greeting: "Welcome back, sample.",
+          traits: ["email: sample@example.com"]
+        }
+      },
+      3600
+    );
     const response = await POST(
       new Request("http://localhost/api/chat", {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-auth0-config": header
+          cookie: `${AUTH0_SESSION_COOKIE}=${cookieValue}`
         },
         body: JSON.stringify({
           messages: [
@@ -69,7 +81,83 @@ describe("chat route", () => {
 
     const body = await response.text();
     expect(body).toContain("Workflow wf-123 is awaiting approval.");
-    expect(body).not.toContain("client-secret");
+    expect(body).not.toContain("password");
     expect(body).not.toContain("issued-access-token");
+  });
+
+  it("does not describe a ready workflow as HITL-bound", async () => {
+    vi.stubEnv("AUTH0_SESSION_SECRET", "x".repeat(32));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/workflows/plan")) {
+          expect(JSON.parse(String(init?.body))).toMatchObject({
+            auth_context_ref: "auth0-access-token"
+          });
+          return Response.json({
+            workflow: {
+              workflow_id: "wf-ready",
+              status: "ready",
+              plan_hash: "sha256:def",
+              policy: { required_scopes: ["read:dns:app.example.com"] },
+              tool_intents: [],
+              proposal: {
+                workflow_id: "wf-ready",
+                user_id: "sample-user",
+                session_id: "sample-session",
+                created_at: new Date().toISOString(),
+                steps: []
+              },
+              created_at: new Date().toISOString()
+            }
+          });
+        }
+        return Response.json({}, { status: 404 });
+      })
+    );
+
+    const cookieValue = createSignedCookieValue(
+      {
+        sessionId: "auth0-session-1",
+        tokenRef: "auth0:sample",
+        authContextRef: "auth0-access-token",
+        scope: "read:users read:apps",
+        audience: "https://api.example.test",
+        expiresAt: Date.now() + 3600_000,
+        userId: "auth0|user-1",
+        userEmail: "sample@example.com",
+        allowedTools: ["inspect_dns_record"],
+        persona: {
+          displayName: "sample",
+          headline: "sample is cleared for 1 workflow tool.",
+          greeting: "Welcome back, sample.",
+          traits: ["email: sample@example.com"]
+        }
+      },
+      3600
+    );
+    const response = await POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: `${AUTH0_SESSION_COOKIE}=${cookieValue}`
+        },
+        body: JSON.stringify({
+          messages: [
+            {
+              id: "message-1",
+              role: "user",
+              parts: [{ type: "text", text: "Inspect DNS" }]
+            }
+          ]
+        })
+      })
+    );
+
+    const body = await response.text();
+    expect(body).toContain("Workflow wf-ready is ready; no HITL approval is required.");
+    expect(body).not.toContain("Workflow wf-ready is awaiting approval.");
   });
 });

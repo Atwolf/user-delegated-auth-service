@@ -40,6 +40,26 @@ class ToolProposal(BaseModel):
         return arguments
 
 
+class ToolIntent(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+
+    agent_name: str = Field(..., min_length=1)
+    mcp_server: str = Field(..., min_length=1)
+    tool_name: str = Field(..., min_length=1)
+    arguments: dict[str, object] = Field(default_factory=dict)
+    reason: str | None = None
+    metadata_ref: str = Field(..., min_length=1)
+
+    @field_validator("arguments")
+    @classmethod
+    def _validate_argument_names(
+        cls,
+        arguments: dict[str, object],
+    ) -> dict[str, object]:
+        _require_non_empty_strings(list(arguments))
+        return arguments
+
+
 class ScopeRequirement(BaseModel):
     model_config = STRICT_MODEL_CONFIG
 
@@ -79,12 +99,57 @@ class WorkflowStep(BaseModel):
 
     required_scopes: list[str] = Field(default_factory=list)
     downstream_audience: str | None = None
+    operation_type: Literal["READ", "WRITE", "ADMIN"] = "READ"
+    blast_radius: Literal["none", "low", "medium", "high"] = "low"
+    hitl_description: str = "Review workflow step before execution"
     mutates_external_state: bool = False
 
     @field_validator("required_scopes")
     @classmethod
     def _normalize_required_scopes(cls, scopes: list[str]) -> list[str]:
         return _dedupe_sorted(scopes)
+
+
+class WorkflowPolicyDecision(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+
+    requires_hitl: bool
+    blast_radius: Literal["none", "low", "medium", "high"]
+    human_description: str = Field(..., min_length=1)
+    required_scopes: list[str] = Field(default_factory=list)
+    denied_reason: str | None = None
+
+    @field_validator("required_scopes")
+    @classmethod
+    def _normalize_required_scopes(cls, scopes: list[str]) -> list[str]:
+        return _dedupe_sorted(scopes)
+
+
+class EgressRequest(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+
+    primitive: Literal["DISCOVERY", "READ", "EXECUTE", "MUTATION"]
+    method: Literal["GET", "POST"]
+    target_mcp: str = Field(..., min_length=1)
+    tool_name: str = Field(..., min_length=1)
+    arguments: dict[str, object] = Field(default_factory=dict)
+    workflow_id: str = Field(..., min_length=1)
+    approval_id: str | None = Field(default=None, min_length=1)
+    obo_token_ref: str | None = Field(default=None, min_length=1)
+
+    @field_validator("arguments")
+    @classmethod
+    def _validate_argument_names(
+        cls,
+        arguments: dict[str, object],
+    ) -> dict[str, object]:
+        _require_non_empty_strings(list(arguments))
+        return arguments
+
+    @field_validator("primitive", "method", mode="before")
+    @classmethod
+    def _normalize_uppercase(cls, value: object) -> object:
+        return value.upper() if isinstance(value, str) else value
 
 
 class WorkflowPlan(BaseModel):

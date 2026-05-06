@@ -1,6 +1,7 @@
 export type WorkflowStatus =
   | "created"
   | "planned"
+  | "ready"
   | "awaiting_approval"
   | "approved"
   | "executing"
@@ -16,6 +17,9 @@ export type WorkflowStep = {
   input_payload_json: string;
   required_scopes: string[];
   downstream_audience?: string | null;
+  operation_type?: "READ" | "WRITE" | "ADMIN";
+  blast_radius?: string | null;
+  hitl_description?: string | null;
   mutates_external_state: boolean;
 };
 
@@ -44,6 +48,12 @@ export type WorkflowRecord = {
   workflow_id: string;
   status: { status: WorkflowStatus };
   plan_hash: string;
+  token_exchange?: {
+    attempted: boolean;
+    audience?: string | null;
+    scopes: string[];
+    expires_at?: string | null;
+  };
   authorization: AuthorizationBundle;
   plan: {
     workflow_id: string;

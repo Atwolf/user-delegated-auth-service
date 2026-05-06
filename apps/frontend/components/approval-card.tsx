@@ -14,6 +14,7 @@ export function ApprovalCard({
 }) {
   const status = workflow.status.status;
   const executable = status === "awaiting_approval";
+  const requiresHitl = status === "awaiting_approval" || status === "approved" || status === "executing";
 
   return (
     <article
@@ -24,7 +25,7 @@ export function ApprovalCard({
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold text-primary">
             <ShieldCheck className="h-4 w-4" />
-            HITL Approval
+            {requiresHitl ? "HITL Approval" : "Workflow Manifest"}
           </div>
           <h2 className="mt-1 text-base font-semibold">{workflow.workflow_id}</h2>
           <p className="mt-1 break-all text-xs text-muted-foreground">{workflow.plan_hash}</p>
@@ -43,6 +44,21 @@ export function ApprovalCard({
               </div>
               <div className="text-xs text-muted-foreground">{step.target_agent}</div>
             </div>
+            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+              {step.operation_type ? (
+                <span className="rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-800">
+                  {step.operation_type}
+                </span>
+              ) : null}
+              {step.blast_radius ? (
+                <span className="rounded-md bg-amber-50 px-2 py-1 font-medium text-amber-900">
+                  Blast radius: {step.blast_radius}
+                </span>
+              ) : null}
+            </div>
+            {step.hitl_description ? (
+              <p className="mt-2 text-sm text-muted-foreground">{step.hitl_description}</p>
+            ) : null}
             <pre className="mt-2 overflow-x-auto rounded-md bg-muted p-2 text-xs">
               {JSON.stringify(JSON.parse(step.input_payload_json), null, 2)}
             </pre>

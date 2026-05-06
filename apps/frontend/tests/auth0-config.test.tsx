@@ -1,66 +1,74 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, beforeEach } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Auth0ConfigPanel } from "@/components/auth0-config-panel";
 import { WorkflowContextProvider } from "@/components/workflow-context";
-import {
-  AUTH0_STORAGE_KEY,
-  DEFAULT_AUTH0_CONFIG,
-  savePublicConfig,
-  validateAuth0Config
-} from "@/lib/auth0-config";
 
-describe("Auth0 config", () => {
+const SESSION_PAYLOAD = {
+  session: {
+    sessionId: "auth0-session-1",
+    tokenRef: "auth0:sample",
+    scope: "read:apps read:users",
+    audience: "https://api.example.test",
+    expiresAt: Date.now() + 3600_000,
+    userId: "auth0|user-1",
+    userEmail: "sample@example.com",
+    allowedTools: ["get_identity_profile", "get_developer_app"],
+    persona: {
+      displayName: "sample",
+      headline: "sample is cleared for 2 workflow tools.",
+      greeting: "Welcome back, sample.",
+      traits: ["email: sample@example.com"]
+    }
+  }
+};
+
+describe("Auth0 user login panel", () => {
   beforeEach(() => {
-    window.localStorage.clear();
+    window.history.replaceState({}, "", "/");
   });
 
-  it("validates required client credentials fields", () => {
-    const invalid = validateAuth0Config({
-      ...DEFAULT_AUTH0_CONFIG,
-      clientId: "",
-      clientSecret: ""
-    });
-
-    expect(invalid.valid).toBe(false);
-    expect(invalid.errors.clientId).toBeTruthy();
-    expect(invalid.errors.clientSecret).toBeTruthy();
-
-    const valid = validateAuth0Config({
-      ...DEFAULT_AUTH0_CONFIG,
-      clientId: "client-id",
-      clientSecret: "client-secret"
-    });
-    expect(valid.valid).toBe(true);
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
-  it("persists public config without the client secret", () => {
-    savePublicConfig(window.localStorage, {
-      ...DEFAULT_AUTH0_CONFIG,
-      clientId: "client-id",
-      audience: "https://api.example.test"
-    });
+  it("does not expose raw OIDC or token configuration fields", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ session: null })));
 
-    const raw = window.localStorage.getItem(AUTH0_STORAGE_KEY);
-    expect(raw).toContain("client-id");
-    expect(raw).not.toContain("client-secret");
-  });
-
-  it("keeps secret input out of localStorage", () => {
     render(
       <WorkflowContextProvider>
         <Auth0ConfigPanel />
       </WorkflowContextProvider>
     );
 
-    fireEvent.change(screen.getByLabelText("OIDC Client ID"), {
-      target: { value: "client-id" }
-    });
-    fireEvent.change(screen.getByLabelText("OIDC Client Secret"), {
-      target: { value: "client-secret" }
-    });
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    expect(screen.getByRole("link", { name: /log in with auth0/i })).toHaveAttribute(
+      "href",
+      "/api/auth/login"
+    );
+    expect(screen.queryByLabelText(/oidc client id/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/client secret/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/token endpoint/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/token keys endpoint/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/user password/i)).not.toBeInTheDocument();
+  });
 
-    expect(window.localStorage.getItem(AUTH0_STORAGE_KEY)).toContain("client-id");
-    expect(window.localStorage.getItem(AUTH0_STORAGE_KEY)).not.toContain("client-secret");
+  it("renders the server-side Auth0 user session state", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(SESSION_PAYLOAD)));
+
+    render(
+      <WorkflowContextProvider>
+        <Auth0ConfigPanel />
+      </WorkflowContextProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/logged in as sample@example.com/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText("read:apps")).toBeInTheDocument();
+    expect(screen.getByText("get_developer_app")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /log out/i })).toHaveAttribute(
+      "href",
+      "/api/auth/logout"
+    );
   });
 });

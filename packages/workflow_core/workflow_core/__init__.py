@@ -14,12 +14,16 @@ from workflow_core.hashing import canonical_json, plan_hash
 from workflow_core.models import (
     ApprovedWorkflow,
     AuthorizationBundle,
+    EgressRequest,
     ScopeRequirement,
+    ToolIntent,
     ToolProposal,
     WorkflowPlan,
+    WorkflowPolicyDecision,
     WorkflowStatus,
     WorkflowStep,
 )
+from workflow_core.policy import evaluate_workflow_policy
 from workflow_core.tool_catalog import (
     INSPECT_REQUEST_AUTHORIZATION,
     TOOL_AUTHORIZATION_CATALOG,
@@ -33,17 +37,21 @@ from workflow_core.tool_catalog import (
 __all__ = [
     "ApprovedWorkflow",
     "AuthorizationBundle",
+    "EgressRequest",
     "INSPECT_REQUEST_AUTHORIZATION",
     "ScopeMaterializationError",
     "ScopeRequirement",
     "TOOL_AUTHORIZATION_CATALOG",
     "ToolAuthorizationSpec",
+    "ToolIntent",
     "ToolProposal",
     "WorkflowAuthzMetadata",
+    "WorkflowPolicyDecision",
     "WorkflowPlan",
     "WorkflowStatus",
     "WorkflowStep",
     "canonical_json",
+    "evaluate_workflow_policy",
     "get_tool_authorization",
     "get_workflow_authz_metadata",
     "materialize_scope",

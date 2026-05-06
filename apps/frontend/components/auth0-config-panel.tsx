@@ -1,223 +1,133 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { RefreshCw, Save, Trash2 } from "lucide-react";
-import {
-  clearPublicConfig,
-  DEFAULT_AUTH0_CONFIG,
-  deriveAuth0Endpoints,
-  loadPublicConfig,
-  savePublicConfig,
-  toPublicConfig,
-  validateAuth0Config,
-  type Auth0Config,
-  type Auth0PublicConfig
-} from "@/lib/auth0-config";
+import { useCallback, useEffect, useState } from "react";
+import { LogIn, LogOut, RefreshCw, ShieldCheck } from "lucide-react";
+import { parseScopeString, type Auth0UserSession } from "@/lib/auth0-config";
 import { useWorkflowContext } from "@/components/workflow-context";
 
 export function Auth0ConfigPanel() {
-  const { setAuth0Config, setAuth0ConfigValid } = useWorkflowContext();
-  const [publicConfig, setPublicConfig] =
-    useState<Auth0PublicConfig>(DEFAULT_AUTH0_CONFIG);
-  const [clientSecret, setClientSecret] = useState("");
-  const [saved, setSaved] = useState(false);
+  const { auth0Session, setAuth0Session } = useWorkflowContext();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refreshSession = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/auth/session", { cache: "no-store" });
+      const payload = (await response.json().catch(() => ({}))) as {
+        session?: Auth0UserSession | null;
+      };
+      setAuth0Session(response.ok ? payload.session ?? null : null);
+    } catch {
+      setAuth0Session(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [setAuth0Session]);
 
   useEffect(() => {
-    setPublicConfig(loadPublicConfig(window.localStorage));
-  }, []);
+    const params = new URLSearchParams(window.location.search);
+    const auth0Error = params.get("auth0_error");
+    if (auth0Error) setError(auth0Error);
+    void refreshSession();
+  }, [refreshSession]);
 
-  const fullConfig: Auth0Config = useMemo(
-    () => ({ ...publicConfig, clientSecret }),
-    [publicConfig, clientSecret]
-  );
-  const validation = validateAuth0Config(fullConfig);
-
-  useEffect(() => {
-    savePublicConfig(window.localStorage, publicConfig);
-  }, [publicConfig]);
-
-  useEffect(() => {
-    setAuth0Config(fullConfig);
-    setAuth0ConfigValid(validation.valid);
-  }, [fullConfig, setAuth0Config, setAuth0ConfigValid, validation.valid]);
-
-  function update<K extends keyof Auth0PublicConfig>(key: K, value: Auth0PublicConfig[K]) {
-    setSaved(false);
-    setPublicConfig((current) => ({ ...current, [key]: value }));
-  }
-
-  function useDiscoveryDocument() {
-    const endpoints = deriveAuth0Endpoints(publicConfig.domain);
-    setPublicConfig((current) => ({ ...current, ...endpoints }));
-  }
-
-  function clearConfig() {
-    clearPublicConfig(window.localStorage);
-    setClientSecret("");
-    setPublicConfig(DEFAULT_AUTH0_CONFIG);
-    setSaved(false);
-  }
-
-  function saveConfig() {
-    savePublicConfig(window.localStorage, toPublicConfig(fullConfig));
-    setSaved(true);
-  }
+  const scopes = auth0Session ? parseScopeString(auth0Session.scope) : [];
 
   return (
     <section className="flex h-full flex-col border-r border-border bg-white">
       <div className="border-b border-border px-5 py-4">
-        <h1 className="text-lg font-semibold">OpenID Connect Configuration</h1>
+        <h1 className="text-lg font-semibold">Auth0 User Login</h1>
       </div>
 
-      <form
-        className="flex flex-1 flex-col gap-4 overflow-y-auto px-5 py-5"
-        onSubmit={(event) => {
-          event.preventDefault();
-          saveConfig();
-        }}
-      >
-        <Field label="Server Template">
-          <select
-            className="input"
-            value={publicConfig.serverTemplate}
-            onChange={() => update("serverTemplate", "Auth0")}
+      <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-5 py-5">
+        <div className="flex items-center gap-3">
+          <a
+            aria-disabled={Boolean(auth0Session)}
+            className="inline-flex h-10 items-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground aria-disabled:pointer-events-none aria-disabled:opacity-50"
+            href="/api/auth/login"
+            title="Log in with Auth0"
           >
-            <option>Auth0</option>
-          </select>
-        </Field>
-
-        <Field label="Auth0 domain" error={validation.errors.domain}>
-          <div className="grid grid-cols-[1fr_auto]">
-            <input
-              aria-label="Auth0 domain"
-              className="input rounded-r-none"
-              value={publicConfig.domain}
-              onChange={(event) => update("domain", event.target.value)}
-              placeholder="samples.auth0.com"
-            />
-            <button
-              className="inline-flex items-center gap-2 rounded-l-none border border-l-0 border-border px-3 text-xs font-semibold uppercase tracking-wide"
-              type="button"
-              title="Use Auth0 discovery document"
-              onClick={useDiscoveryDocument}
-            >
-              <RefreshCw className="h-4 w-4" />
-              Discover
-            </button>
-          </div>
-        </Field>
-
-        <Field label="Authorization Token Endpoint">
-          <input
-            className="input bg-muted"
-            value={`https://${publicConfig.domain.replace(/^https?:\/\//, "")}/authorize`}
-            readOnly
-          />
-        </Field>
-
-        <Field label="Token Endpoint" error={validation.errors.tokenEndpoint}>
-          <input
-            aria-label="Token Endpoint"
-            className="input"
-            value={publicConfig.tokenEndpoint}
-            onChange={(event) => update("tokenEndpoint", event.target.value)}
-          />
-        </Field>
-
-        <Field label="Token Keys Endpoint" error={validation.errors.jwksEndpoint}>
-          <input
-            aria-label="Token Keys Endpoint"
-            className="input"
-            value={publicConfig.jwksEndpoint}
-            onChange={(event) => update("jwksEndpoint", event.target.value)}
-          />
-        </Field>
-
-        <Field label="OIDC Client ID" error={validation.errors.clientId}>
-          <input
-            aria-label="OIDC Client ID"
-            className="input"
-            value={publicConfig.clientId}
-            onChange={(event) => update("clientId", event.target.value)}
-            placeholder="client id"
-          />
-        </Field>
-
-        <Field label="OIDC Client Secret" error={validation.errors.clientSecret}>
-          <input
-            aria-label="OIDC Client Secret"
-            className="input"
-            type="password"
-            value={clientSecret}
-            onChange={(event) => {
-              setSaved(false);
-              setClientSecret(event.target.value);
-            }}
-            placeholder="kept in memory only"
-          />
-        </Field>
-
-        <Field label="Scope" error={validation.errors.scope}>
-          <input
-            aria-label="Scope"
-            className="input"
-            value={publicConfig.scope}
-            onChange={(event) => update("scope", event.target.value)}
-          />
-        </Field>
-
-        <Field label="Audience (optional)">
-          <input
-            aria-label="Audience"
-            className="input"
-            value={publicConfig.audience}
-            onChange={(event) => update("audience", event.target.value)}
-            placeholder="https://api.example.com"
-          />
-        </Field>
-
-        <div className="mt-2 flex items-center gap-3">
+            <LogIn className="h-4 w-4" />
+            Log in with Auth0
+          </a>
           <button
-            className="inline-flex h-10 items-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-            type="submit"
-            disabled={!validation.valid}
-            title="Save non-secret configuration"
-          >
-            <Save className="h-4 w-4" />
-            Save
-          </button>
-          <button
-            className="inline-flex h-10 items-center gap-2 rounded-md border border-border px-4 text-sm font-semibold"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border disabled:opacity-50"
             type="button"
-            onClick={clearConfig}
-            title="Clear local config"
+            onClick={() => void refreshSession()}
+            disabled={loading}
+            title="Refresh session"
           >
-            <Trash2 className="h-4 w-4" />
-            Clear local config
+            <RefreshCw className="h-4 w-4" />
           </button>
-          <span className="text-sm text-muted-foreground" role="status">
-            {saved ? "Non-secret config saved." : validation.valid ? "Ready." : "Incomplete."}
-          </span>
         </div>
-      </form>
+
+        <div className="flex items-center justify-between rounded-md border border-border bg-muted px-3 py-2">
+          <span className="min-w-0 truncate text-sm text-muted-foreground" role="status">
+            {auth0Session
+              ? `Logged in as ${auth0Session.userEmail ?? auth0Session.userId}`
+              : loading
+                ? "Checking session."
+                : "Logged out."}
+          </span>
+          {auth0Session ? (
+            <a
+              className="inline-flex h-8 items-center gap-2 rounded-md border border-border bg-white px-3 text-xs font-semibold"
+              href="/api/auth/logout"
+              title="Log out"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Log out
+            </a>
+          ) : null}
+        </div>
+
+        {auth0Session ? (
+          <div className="grid gap-3 rounded-md border border-border p-3 text-xs">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <ShieldCheck className="h-4 w-4 text-primary" />
+              {auth0Session.persona.displayName}
+            </div>
+            <div className="text-muted-foreground">{auth0Session.persona.headline}</div>
+            {scopes.length ? (
+              <TokenList label="Scopes" items={scopes} tone="cyan" />
+            ) : null}
+            {auth0Session.allowedTools.length ? (
+              <TokenList label="Tools" items={auth0Session.allowedTools} tone="emerald" />
+            ) : null}
+          </div>
+        ) : null}
+
+        {error ? <div className="text-sm font-medium text-red-700">{error}</div> : null}
+      </div>
     </section>
   );
 }
 
-function Field({
+function TokenList({
   label,
-  error,
-  children
+  items,
+  tone
 }: {
   label: string;
-  error?: string;
-  children: ReactNode;
+  items: string[];
+  tone: "cyan" | "emerald";
 }) {
+  const className =
+    tone === "cyan"
+      ? "rounded-md bg-cyan-50 px-2 py-1 text-cyan-900"
+      : "rounded-md bg-emerald-50 px-2 py-1 text-emerald-900";
+
   return (
-    <label className="grid gap-2">
-      <span className="text-sm font-medium text-muted-foreground">{label}</span>
-      {children}
-      {error ? <span className="text-xs font-medium text-red-700">{error}</span> : null}
-    </label>
+    <div>
+      <span className="font-semibold">{label}</span>
+      <div className="mt-1 flex flex-wrap gap-1">
+        {items.map((item) => (
+          <span className={className} key={item}>
+            {item}
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }

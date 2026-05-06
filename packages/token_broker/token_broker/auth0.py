@@ -3,14 +3,19 @@ from __future__ import annotations
 import json
 from base64 import urlsafe_b64decode
 from binascii import Error as Base64DecodeError
+from datetime import UTC, datetime, timedelta
 from types import TracebackType
 from typing import Any, cast
 
 import httpx
 
 from token_broker.models import (
+    ACCESS_TOKEN_TYPE,
     Auth0ClientCredentialsConfig,
     Auth0ClientCredentialsTokenResponse,
+    Auth0OnBehalfOfConfig,
+    WorkflowTokenExchangeRequest,
+    WorkflowTokenExchangeResponse,
 )
 
 
@@ -65,6 +70,69 @@ class Auth0ClientCredentialsClient:
             await self._client.aclose()
 
     async def __aenter__(self) -> Auth0ClientCredentialsClient:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        await self.aclose()
+
+
+class Auth0OnBehalfOfClient:
+    """Auth0 user-delegated token-exchange client."""
+
+    def __init__(
+        self,
+        *,
+        client: httpx.AsyncClient | None = None,
+        timeout: float = 10.0,
+    ) -> None:
+        self._owns_client = client is None
+        self._client = client or httpx.AsyncClient(timeout=timeout)
+
+    async def exchange_for_workflow_token(
+        self,
+        config: Auth0OnBehalfOfConfig,
+        request: WorkflowTokenExchangeRequest,
+    ) -> WorkflowTokenExchangeResponse:
+        payload: dict[str, str] = {
+            "client_id": config.client_id,
+            "client_secret": config.client_secret.get_secret_value(),
+            "subject_token": request.auth_context_ref,
+            "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+            "subject_token_type": ACCESS_TOKEN_TYPE,
+            "requested_token_type": ACCESS_TOKEN_TYPE,
+            "audience": request.requested_audience or config.audience,
+        }
+        if request.requested_scopes:
+            payload["scope"] = " ".join(request.requested_scopes)
+
+        response = await self._client.post(config.token_endpoint, data=payload)
+        response.raise_for_status()
+        response_payload = cast(dict[str, Any], response.json())
+        access_token = _required_string(response_payload, "access_token")
+        expires_in = response_payload.get("expires_in")
+        raw_scope = response_payload.get("scope")
+        scopes = (
+            _parse_scope_string(raw_scope)
+            if isinstance(raw_scope, str) and raw_scope.strip()
+            else tuple(request.requested_scopes)
+        )
+        return WorkflowTokenExchangeResponse(
+            access_token=access_token,
+            scopes=list(scopes),
+            audience=request.requested_audience or config.audience,
+            expires_at=_expires_at(expires_in if isinstance(expires_in, int) else None),
+        )
+
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
+
+    async def __aenter__(self) -> Auth0OnBehalfOfClient:
         return self
 
     async def __aexit__(
@@ -137,3 +205,7 @@ def _scopes_from_unverified_jwt(access_token: str) -> tuple[str, ...]:
 def _with_base64_padding(value: str) -> bytes:
     padding = "=" * (-len(value) % 4)
     return f"{value}{padding}".encode("ascii")
+
+
+def _expires_at(expires_in: int | None) -> datetime:
+    return datetime.now(UTC) + timedelta(seconds=expires_in or 3600)

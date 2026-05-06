@@ -16,7 +16,11 @@ def test_known_tool_authorization_metadata_is_centralized() -> None:
         "read:apps",
         "read:developer",
     )
+    assert authz.workflow_scope_templates == ("read:client:{appid}",)
+    assert authz.scope_args == ("appid",)
+    assert authz.has_dynamic_workflow_scopes is True
     assert authz.hitl_description == "Read developer app metadata for selected app ID"
+    assert authz.blast_radius == "low"
 
 
 def test_unknown_tool_uses_inspect_scope_requirement() -> None:
@@ -24,6 +28,7 @@ def test_unknown_tool_uses_inspect_scope_requirement() -> None:
 
     assert len(requirements) == 1
     assert requirements[0].scope_template == "read:workflow"
+    assert requirements[0].scope_args == []
     assert requirements[0].hitl_description == "Inspect the user request for workflow planning"
 
 
@@ -41,11 +46,52 @@ def test_auth0_issued_scopes_are_preserved_when_tenant_uses_custom_names() -> No
     ) == ["apps:read", "tenant:workflow"]
 
 
-def test_auth0_scope_requirements_use_issued_token_scopes() -> None:
+def test_auth0_known_dynamic_scopes_use_workflow_scope_templates() -> None:
     requirements = scope_requirements_for_auth0_token(
         "get_identity_profile",
         ["profile", "custom:permission"],
     )
 
-    assert [requirement.scope_template for requirement in requirements] == ["profile"]
+    assert [requirement.scope_template for requirement in requirements] == [
+        "read:user:{subject_user_id}"
+    ]
+    assert requirements[0].scope_args == ["subject_user_id"]
+
+
+def test_auth0_known_static_scopes_preserve_issued_token_scope() -> None:
+    requirements = scope_requirements_for_auth0_token(
+        "propose_workflow_plan",
+        ["read:workflow"],
+    )
+
+    assert [requirement.scope_template for requirement in requirements] == [
+        "read:workflow"
+    ]
     assert requirements[0].scope_args == []
+
+
+def test_auth0_custom_scopes_are_preserved_when_no_known_candidate_matches() -> None:
+    requirements = scope_requirements_for_auth0_token(
+        "get_identity_profile",
+        ["custom:permission"],
+    )
+
+    assert [requirement.scope_template for requirement in requirements] == [
+        "custom:permission"
+    ]
+    assert requirements[0].scope_args == []
+
+
+def test_network_and_cloud_tool_authorization_metadata() -> None:
+    firewall = get_tool_authorization("update_firewall_rule")
+    vm = get_tool_authorization("restart_vm")
+
+    assert firewall.op == "WRITE"
+    assert firewall.blast_radius == "high"
+    assert firewall.downstream_audience == "network-mcp"
+    assert firewall.workflow_scope_templates == ("write:firewall:{rule_id}",)
+
+    assert vm.op == "WRITE"
+    assert vm.blast_radius == "medium"
+    assert vm.downstream_audience == "cloud-mcp"
+    assert vm.workflow_scope_templates == ("write:vm:{vm_id}",)

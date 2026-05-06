@@ -6,15 +6,14 @@ import {
   MessagePrimitive,
   ThreadPrimitive
 } from "@assistant-ui/react";
+import { useWorkflowContext } from "@/components/workflow-context";
 
 export function Thread() {
   return (
     <ThreadPrimitive.Root className="flex h-full min-h-0 flex-col bg-white">
       <ThreadPrimitive.Viewport className="flex-1 overflow-y-auto px-5 py-4">
         <ThreadPrimitive.Empty>
-          <div className="rounded-lg border border-border bg-muted p-4 text-sm text-muted-foreground">
-            Waiting for workflow request.
-          </div>
+          <AssistantWelcome />
         </ThreadPrimitive.Empty>
         <ThreadPrimitive.Messages
           components={{
@@ -47,6 +46,33 @@ export function Thread() {
         </div>
       </ComposerPrimitive.Root>
     </ThreadPrimitive.Root>
+  );
+}
+
+function AssistantWelcome() {
+  const { auth0Session } = useWorkflowContext();
+  if (!auth0Session) {
+    return (
+      <div className="rounded-lg border border-border bg-muted p-4 text-sm text-muted-foreground">
+        Waiting for workflow request.
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-muted p-4 text-sm">
+      <div className="font-semibold text-foreground">{auth0Session.persona.greeting}</div>
+      <div className="mt-2 text-muted-foreground">{auth0Session.persona.headline}</div>
+      {auth0Session.persona.traits.length ? (
+        <div className="mt-3 flex flex-wrap gap-1">
+          {auth0Session.persona.traits.map((trait) => (
+            <span className="rounded-md bg-white px-2 py-1 text-xs text-muted-foreground" key={trait}>
+              {trait}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

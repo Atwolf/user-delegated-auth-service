@@ -113,6 +113,34 @@ class WorkflowTokenExchangeResponse(BaseModel):
         return sorted(_normalize_scopes(value, allow_empty=True))
 
 
+class Auth0OnBehalfOfConfig(BaseModel):
+    """Auth0 user-delegated OBO token exchange configuration."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    domain: str = Field(..., min_length=1)
+    token_endpoint: str = Field(..., min_length=1)
+    client_id: str = Field(..., min_length=1)
+    client_secret: SecretStr = Field(..., min_length=1, repr=False)
+    audience: str = Field(..., min_length=1)
+
+    @field_validator("domain")
+    @classmethod
+    def _normalize_domain(cls, value: str) -> str:
+        domain = value.strip().removeprefix("https://").removeprefix("http://").rstrip("/")
+        if not domain:
+            raise ValueError("domain must not be blank")
+        return domain
+
+    @field_validator("token_endpoint")
+    @classmethod
+    def _validate_endpoint(cls, value: str) -> str:
+        endpoint = value.strip()
+        if not endpoint.startswith(("https://", "http://")):
+            raise ValueError("endpoint must be an HTTP(S) URL")
+        return endpoint
+
+
 class Auth0ClientCredentialsConfig(BaseModel):
     """Validated Auth0 Client Credentials configuration for sample app identity."""
 

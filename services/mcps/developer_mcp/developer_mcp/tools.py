@@ -12,8 +12,8 @@ _GET_DEVELOPER_APP_AUTHZ = get_tool_authorization("get_developer_app")
 
 
 @restricted(
-    scopes=list(_GET_DEVELOPER_APP_AUTHZ.auth0_scope_candidates),
-    args=None,
+    scopes=list(_GET_DEVELOPER_APP_AUTHZ.workflow_scope_templates),
+    args=list(_GET_DEVELOPER_APP_AUTHZ.scope_args),
     op=_GET_DEVELOPER_APP_AUTHZ.op,
     hitl=_GET_DEVELOPER_APP_AUTHZ.hitl_description,
 )

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
-from datetime import UTC, datetime
 from typing import Any, cast
 
 import httpx
@@ -59,9 +57,6 @@ class WorkflowOrchestrator:
         resolved_subagents = (
             list(subagents) if subagents is not None else await self.discover_subagents()
         )
-        if not resolved_subagents:
-            resolved_subagents = _sample_subagents()
-
         request = CapabilityRequest(
             query=user_query,
             user_id=user_id,
@@ -71,7 +66,7 @@ class WorkflowOrchestrator:
         proposals: list[ToolProposal] = []
         for subagent in resolved_subagents:
             subagent_proposals = await self._request_single_subagent(subagent, request)
-            proposals.extend(subagent_proposals or [_fallback_proposal(subagent, user_query)])
+            proposals.extend(subagent_proposals)
 
         return proposals
 
@@ -131,77 +126,3 @@ def _parse_capability_payload(
     legacy_payload = dict(payload)
     legacy_payload.setdefault("agent_name", default_agent_name)
     return [ToolProposal.model_validate(legacy_payload)]
-
-
-def _sample_subagents() -> list[SubagentRecord]:
-    now = datetime.now(UTC)
-    return [
-        SubagentRecord(
-            agent_name="planner",
-            base_url="http://planner-agent:8080",
-            mcp_server_name="planner-mcp",
-            enabled=True,
-            priority=10,
-            updated_at=now,
-        ),
-        SubagentRecord(
-            agent_name="identity",
-            base_url="http://identity-agent:8080",
-            mcp_server_name="identity-mcp",
-            enabled=True,
-            priority=20,
-            updated_at=now,
-        ),
-        SubagentRecord(
-            agent_name="developer",
-            base_url="http://developer-agent:8080",
-            mcp_server_name="developer-mcp",
-            enabled=True,
-            priority=30,
-            updated_at=now,
-        ),
-    ]
-
-
-def _fallback_proposal(subagent: SubagentRecord, user_query: str) -> ToolProposal:
-    identity = f"{subagent.agent_name} {subagent.mcp_server_name}".lower()
-    if "identity" in identity:
-        return ToolProposal(
-            agent_name=subagent.agent_name,
-            tool_name="get_identity_profile",
-            arguments={"subject_user_id": _extract_value(user_query, "user", "sample-user")},
-            reason="Identity subagent proposes reading the requested identity profile.",
-        )
-    if "developer" in identity:
-        return ToolProposal(
-            agent_name=subagent.agent_name,
-            tool_name="get_developer_app",
-            arguments={"appid": _extract_value(user_query, "app", "sample-app")},
-            reason="Developer subagent proposes reading app metadata.",
-        )
-    if "billing" in identity:
-        return ToolProposal(
-            agent_name=subagent.agent_name,
-            tool_name="get_account_balance",
-            arguments={"account_id": _extract_value(user_query, "account", "sample-account")},
-            reason="Billing subagent proposes reading account balance.",
-        )
-    if "planner" in identity:
-        return ToolProposal(
-            agent_name=subagent.agent_name,
-            tool_name="propose_workflow_plan",
-            arguments={"query": user_query},
-            reason="Planner subagent proposes the initial workflow plan.",
-        )
-
-    return ToolProposal(
-        agent_name=subagent.agent_name,
-        tool_name="inspect_request",
-        arguments={"query": user_query},
-        reason="Subagent proposes inspecting the request.",
-    )
-
-
-def _extract_value(query: str, label: str, fallback: str) -> str:
-    match = re.search(rf"{label}[:=\s]+([A-Za-z0-9_.:-]+)", query, flags=re.IGNORECASE)
-    return match.group(1) if match else fallback

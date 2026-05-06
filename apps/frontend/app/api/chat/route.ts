@@ -3,15 +3,15 @@ import {
   createUIMessageStreamResponse,
   type UIMessage
 } from "ai";
-import { decodeAuth0ConfigHeader, validateAuth0Config } from "@/lib/auth0-config";
+import { readAuth0SessionCookie } from "@/lib/server/auth0-session";
 import { rememberWorkflow } from "@/lib/server/workflow-store";
-import { exchangeClientCredentials, planWorkflow } from "@/lib/server/supervisor";
+import { planWorkflow } from "@/lib/server/supervisor";
 
 export const maxDuration = 30;
 
 export async function POST(req: Request) {
   const { messages }: { messages?: UIMessage[] } = await req.json();
-  const config = decodeAuth0ConfigHeader(req.headers.get("x-auth0-config"));
+  const session = readAuth0SessionCookie(req.headers.get("cookie"));
   const question = extractLastUserText(messages ?? []);
 
   return createUIMessageStreamResponse({
@@ -20,12 +20,12 @@ export async function POST(req: Request) {
         const textId = "workflow-response";
         writer.write({ type: "text-start", id: textId });
 
-        if (!config || !validateAuth0Config(config).valid) {
+        if (!session) {
           writer.write({
             type: "text-delta",
             id: textId,
             delta:
-              "Auth0 Client Credentials config is missing or incomplete. Fill the configuration panel, keep the client secret in memory, then send the workflow request again."
+              "Auth0 user login is required before workflow planning. Log in with a user-scoped Auth0 account, then send the workflow request again."
           });
           writer.write({ type: "text-end", id: textId });
           return;
@@ -35,23 +35,24 @@ export async function POST(req: Request) {
           writer.write({
             type: "text-delta",
             id: textId,
-            delta: "Send a workflow request after the Auth0 Client Credentials config is valid."
+            delta: "Send a workflow request after Auth0 user login succeeds."
           });
           writer.write({ type: "text-end", id: textId });
           return;
         }
 
         try {
-          const token = await exchangeClientCredentials(config);
-          const workflow = await planWorkflow(question, token.token_ref, token.scope);
+          const workflow = await planWorkflow(question, session);
           rememberWorkflow(workflow);
           writer.write({
             type: "text-delta",
             id: textId,
             delta: [
-              `Token exchange succeeded for ${config.domain}.`,
-              `Workflow ${workflow.workflow_id} is awaiting approval.`,
-              `Review the manifest card before deterministic execution.`,
+              `User login active for ${session.userEmail ?? session.userId}.`,
+              workflowStatusLine(workflow.workflow_id, workflow.status.status),
+              workflow.status.status === "awaiting_approval"
+                ? "Review the HITL manifest card before deterministic execution."
+                : "Review the manifest card for the deterministic workflow plan.",
               `Telemetry: ${process.env.NEXT_PUBLIC_SIDECAR_URL ?? "http://localhost:4319/v1/telemetry"}`
             ].join("\n")
           });
@@ -86,4 +87,14 @@ function extractLastUserText(messages: UIMessage[]): string {
     .trim();
 
   return text;
+}
+
+function workflowStatusLine(workflowId: string, status: string): string {
+  if (status === "ready") {
+    return `Workflow ${workflowId} is ready; no HITL approval is required.`;
+  }
+  if (status === "awaiting_approval") {
+    return `Workflow ${workflowId} is awaiting approval.`;
+  }
+  return `Workflow ${workflowId} is ${status.replace("_", " ")}.`;
 }

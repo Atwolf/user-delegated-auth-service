@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from workflow_core.models import (
     ApprovedWorkflow,
     AuthorizationBundle,
@@ -16,34 +16,42 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-class Auth0ClientCredentialsTokenRequest(BaseModel):
+class UserPersona(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    domain: str = Field(..., min_length=1)
-    token_endpoint: str = Field(..., min_length=1)
-    jwks_endpoint: str = Field(..., min_length=1)
-    client_id: str = Field(..., min_length=1)
-    client_secret: SecretStr | None = Field(default=None, repr=False)
-    scope: str = ""
-    audience: str | None = Field(default=None, min_length=1)
-    user_id: str = Field(default="sample-user", min_length=1)
-    session_id: str = Field(default="sample-session", min_length=1)
+    display_name: str = Field(..., min_length=1)
+    headline: str = Field(..., min_length=1)
+    greeting: str = Field(..., min_length=1)
+    traits: list[str] = Field(default_factory=list[str])
 
-    @field_validator("scope")
+
+class Auth0UserSessionMetadataRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str = Field(..., min_length=1)
+    session_id: str = Field(..., min_length=1)
+    token_ref: str = Field(..., min_length=1)
+    token_scopes: list[str] = Field(default_factory=list[str])
+    audience: str | None = None
+    user_email: str | None = Field(default=None, min_length=1)
+    user_name: str | None = Field(default=None, min_length=1)
+
+    @field_validator("token_scopes")
     @classmethod
-    def _normalize_scope(cls, value: str) -> str:
-        return " ".join(part for part in value.split(" ") if part)
+    def _normalize_token_scopes(cls, value: list[str]) -> list[str]:
+        return sorted({scope.strip() for scope in value if scope.strip()})
 
 
-class Auth0ClientCredentialsTokenResult(BaseModel):
+class Auth0UserSessionMetadataResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    access_token: str = Field(..., min_length=1, repr=False)
-    token_type: Literal["Bearer"] = "Bearer"
-    expires_in: int | None = Field(default=None, ge=1)
     scope: str = ""
     audience: str | None = None
     token_ref: str = Field(..., min_length=1)
+    user_id: str = Field(..., min_length=1)
+    user_email: str | None = None
+    allowed_tools: list[str] = Field(default_factory=list[str])
+    persona: UserPersona
 
 
 class WorkflowPlanRequest(BaseModel):
@@ -56,11 +64,19 @@ class WorkflowPlanRequest(BaseModel):
     auth_context_ref: str | None = Field(default=None, min_length=1)
     token_ref: str | None = Field(default=None, min_length=1)
     token_scopes: list[str] = Field(default_factory=list)
+    allowed_tools: list[str] | None = None
 
     @field_validator("token_scopes")
     @classmethod
     def _normalize_token_scopes(cls, value: list[str]) -> list[str]:
         return sorted({scope.strip() for scope in value if scope.strip()})
+
+    @field_validator("allowed_tools")
+    @classmethod
+    def _normalize_allowed_tools(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        return sorted({tool.strip() for tool in value if tool.strip()})
 
 
 class WorkflowApprovalRequest(BaseModel):

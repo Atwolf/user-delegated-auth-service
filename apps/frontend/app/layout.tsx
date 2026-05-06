@@ -5,7 +5,7 @@ import { AssistantRoot } from "@/components/assistant-root";
 
 export const metadata: Metadata = {
   title: "Magnum Opus Auth0 Workflow Sample",
-  description: "assistant-ui sample for Auth0 Client Credentials workflows"
+  description: "assistant-ui sample for Auth0 user-scoped workflows"
 };
 
 export default function RootLayout({
