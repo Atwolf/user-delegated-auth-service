@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-service-supervisor
+spec:
+  selector:
+    app: agent-service-supervisor
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+    - name: observability
+      port: 4319
+      targetPort: 4319

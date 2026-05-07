@@ -1,0 +1,21 @@
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.pyright/
+.env
+.env.*
+.env copy
+!.env.example
+!*.env.example
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.sqlite-shm
+*.sqlite-wal
+data/supervisor/*.sqlite
+apps/frontend/.next/
+apps/frontend/node_modules/
+apps/frontend/test-results/
+apps/frontend/playwright-report/
+worktrees/

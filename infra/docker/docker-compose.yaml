@@ -1,0 +1,127 @@
+services:
+  supervisor:
+    build:
+      context: ../..
+      dockerfile: services/supervisor/Dockerfile
+    environment:
+      SUBAGENT_DB_PATH: /data/supervisor/subagents.sqlite
+      OBSERVABILITY_SIDECAR_URL: http://observability-sidecar:4319
+      REDIS_URL: redis://redis:6379/0
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN:-}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-}
+      AUTH0_MANAGEMENT_CLIENT_ID: ${AUTH0_MANAGEMENT_CLIENT_ID:-}
+      AUTH0_MANAGEMENT_CLIENT_SECRET: ${AUTH0_MANAGEMENT_CLIENT_SECRET:-}
+      AUTH0_MANAGEMENT_AUDIENCE: ${AUTH0_MANAGEMENT_AUDIENCE:-}
+    volumes:
+      - ../../data/supervisor:/data/supervisor
+    depends_on:
+      - observability-sidecar
+      - redis
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: apps/frontend/Dockerfile
+    environment:
+      SUPERVISOR_BASE_URL: http://supervisor:8080
+      AGENT_SERVICE_URL: http://agent-service:8090
+      AG_UI_GATEWAY_URL: http://ag-ui-gateway:8088/agent
+      NEXT_PUBLIC_SIDECAR_URL: http://localhost:4319/v1/telemetry
+      NEXT_PUBLIC_AG_UI_GATEWAY_URL: http://localhost:8088/agent
+      NEXT_PUBLIC_CHAINLIT_MIDDLEWARE_URL: http://localhost:8092
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN:-}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-}
+      AUTH0_USER_CLIENT_ID: ${AUTH0_USER_CLIENT_ID:-}
+      AUTH0_USER_SCOPE: ${AUTH0_USER_SCOPE:-openid profile email}
+      AUTH0_APP_BASE_URL: ${AUTH0_APP_BASE_URL:-http://127.0.0.1:3000}
+      AUTH0_CALLBACK_URL: ${AUTH0_CALLBACK_URL:-}
+      AUTH0_SESSION_SECRET: ${AUTH0_SESSION_SECRET:-}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - supervisor
+      - ag-ui-gateway
+
+  chainlit-middleware:
+    build:
+      context: ../..
+      dockerfile: services/chainlit_middleware/Dockerfile
+    environment:
+      AG_UI_GATEWAY_URL: http://ag-ui-gateway:8088/agent
+      AGENT_SERVICE_URL: http://agent-service:8090
+      AUTH0_SESSION_SECRET: ${AUTH0_SESSION_SECRET:-}
+    ports:
+      - "8092:8092"
+    depends_on:
+      - ag-ui-gateway
+      - agent-service
+
+  ag-ui-gateway:
+    build:
+      context: ../..
+      dockerfile: services/ag_ui_gateway/Dockerfile
+    environment:
+      AGENT_SERVICE_URL: http://agent-service:8090
+    ports:
+      - "8088:8088"
+    depends_on:
+      - agent-service
+
+  agent-service:
+    build:
+      context: ../..
+      dockerfile: services/agent_service/Dockerfile
+    environment:
+      EGRESS_GATEWAY_URL: http://egress-gateway:8091
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN:-}
+      AUTH0_OBO_CLIENT_ID: ${AUTH0_OBO_CLIENT_ID:-}
+      AUTH0_OBO_CLIENT_SECRET: ${AUTH0_OBO_CLIENT_SECRET:-}
+      AUTH0_OBO_AUDIENCE: ${AUTH0_OBO_AUDIENCE:-}
+      AUTH0_OBO_DOWNSTREAM_AUDIENCE: ${AUTH0_OBO_DOWNSTREAM_AUDIENCE:-}
+    ports:
+      - "8090:8090"
+    depends_on:
+      - egress-gateway
+      - redis
+
+  egress-gateway:
+    build:
+      context: ../..
+      dockerfile: services/egress_gateway/Dockerfile
+    environment:
+      NETWORK_MCP_URL: http://network-mcp:8011
+      CLOUD_MCP_URL: http://cloud-mcp:8012
+      EGRESS_CALL_MCP_TOOLS: "true"
+    ports:
+      - "8091:8091"
+    depends_on:
+      - network-mcp
+      - cloud-mcp
+
+  observability-sidecar:
+    build:
+      context: ../..
+      dockerfile: services/observability_sidecar/Dockerfile
+    ports:
+      - "4319:4319"
+
+  network-mcp:
+    build:
+      context: ../..
+      dockerfile: services/mcps/network_mcp/Dockerfile
+    expose:
+      - "8011"
+
+  cloud-mcp:
+    build:
+      context: ../..
+      dockerfile: services/mcps/cloud_mcp/Dockerfile
+    expose:
+      - "8012"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
