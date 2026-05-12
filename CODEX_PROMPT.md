@@ -1,3 +1,9 @@
+> Historical implementation prompt. This file records the original VM-first implementation
+> guidance. Current runtime boundaries are documented in `docs/architecture/agent-service.md`
+> and `docs/architecture/auth0-assistant-ui-workflow.md`; those docs supersede this prompt for
+> the vNext assistant-ui AG-UI, Agent Service, Redis-backed state, and Chainlit removal
+> decisions.
+
 ## Primary implementation language
 
 Use **Python** as the primary implementation language.
@@ -15,12 +21,11 @@ from typing import Any, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field
 ```
 
-Do not use untyped dictionaries for core workflow, session, token, or A2A contracts except at the outermost unknown payload boundary. For internal A2A payloads, use **strict typed payload schemas per action**.
+Do not use untyped dictionaries for core workflow, session, token, MCP, or AG-UI contracts
+except at the outermost unknown payload boundary.
 
 Use Pydantic models for:
 
-* A2A envelopes
-* agent invocation context
 * workflow plans
 * workflow steps
 * approved workflows
@@ -34,32 +39,31 @@ Use `Protocol` interfaces for component abstractions, such as:
 
 * `SessionStateStore`
 * `TokenBrokerClient`
-* `A2AClient`
-* `A2AServer`
 * `WorkflowEventEmitter`
-* `AgentHandler`
+* `ToolIntentProvider`
 
 ---
 
-## Resolved implementation decisions (authoritative)
+## Historical resolved implementation decisions
 
-Apply these defaults unless a concrete repository constraint conflicts:
+These defaults were used for the original implementation prompt. For vNext, apply these only
+where current architecture docs do not conflict:
 
 1. **Pydantic version:** Pydantic v2.
-2. **Supervisor/subagent framework:** prefer LangChain `create_deep_agent` / `create_agent` when containerizable; otherwise use FastAPI.
+2. **Agent runtime framework:** Google ADK behind the Agent Service boundary.
 3. **Concurrency model:** fully async implementation.
-4. **A2A HTTP client:** `httpx.AsyncClient` is approved.
+4. **HTTP client:** `httpx.AsyncClient` is approved.
 5. **Redis client:** `redis.asyncio` is approved; include a Redis layer in Compose.
 6. **Package/dependency manager:** `uv`.
 7. **Type checking:** run both `mypy` and `pyright`.
 8. **Linting/formatting:** `ruff`.
 9. **Container build strategy:** shared Python base image for service containers.
 10. **Shared package install mode (dev):** editable local packages.
-11. **A2A payload typing:** strict typed payloads per action.
+11. **Runtime payload typing:** strict typed payloads per action.
 12. **Redis representation:** use Pydantic JSON blobs by default; use Redis-native structures only when they materially improve access patterns. Evaluate LangChain cache adapters if useful.
-13. **Workflow event buffering:** use a temporal cache via Redis in addition to OTEL emission.
-14. **Workflow state durability:** use Temporal for resilient workflow execution. If Redis also stores plan state, prefer canonicalized plan JSON + hash.
-15. **OBO token responses:** return raw access tokens.
+13. **Workflow event buffering:** use Redis-backed buffering in addition to OTEL emission.
+14. **Workflow state durability:** use Agent Service persistence with Redis and process-local fallback for POC mode.
+15. **OBO token responses:** keep raw access tokens server-side.
 
 ---
 
@@ -238,76 +242,55 @@ Adapt to existing repository structure first. If no structure exists, prefer:
         app.py
         config.py
         routes.py
-        discovery_sqlite.py
-        workflow_orchestrator.py
-        scope_materializer.py
       tests/
-      Dockerfile
 
-    agents/
-      planner/
-        planner_agent/
-          __init__.py
-          app.py
-          handler.py
-          config.py
-        tests/
-        Dockerfile
+    ag_ui_gateway/
+      ag_ui_gateway/
+        __init__.py
+        app.py
+        client.py
+        models.py
+        sse.py
+      tests/
 
-      authorizer/
-        authorizer_agent/
-          __init__.py
-          app.py
-          handler.py
-          config.py
-        tests/
-        Dockerfile
+    agent_service/
+      agent_service/
+        __init__.py
+        app.py
+        models.py
+        orchestration.py
+        providers.py
+        state.py
+      tests/
 
-      executor/
-        executor_agent/
-          __init__.py
-          app.py
-          handler.py
-          config.py
-        tests/
-        Dockerfile
+    egress_gateway/
+      egress_gateway/
+        __init__.py
+        app.py
+      tests/
 
     mcps/
-      developer_mcp/
-        developer_mcp/
+      network_mcp/
+        network_mcp/
           __init__.py
           server.py
           tools.py
         tests/
-        Dockerfile
 
-      billing_mcp/
-        billing_mcp/
+      cloud_mcp/
+        cloud_mcp/
           __init__.py
           server.py
           tools.py
         tests/
-        Dockerfile
 
-      identity_mcp/
-        identity_mcp/
-          __init__.py
-          server.py
-          tools.py
-        tests/
-        Dockerfile
-
-  packages/
-    a2a_runtime/
-      a2a_runtime/
+    observability_sidecar/
+      observability_sidecar/
         __init__.py
-        models.py
-        validation.py
-        client.py
-        server.py
-        errors.py
+        app.py
       tests/
 
+  packages/
     workflow_core/
       workflow_core/
         __init__.py
@@ -345,12 +328,12 @@ Adapt to existing repository structure first. If no structure exists, prefer:
         events.py
       tests/
 
-    agent_runtime/
-      agent_runtime/
+    mcp_runtime/
+      mcp_runtime/
         __init__.py
-        interfaces.py
-        context.py
-        config.py
+        auth.py
+        decorators.py
+        fastmcp.py
       tests/
 
   infra/
@@ -362,10 +345,6 @@ Adapt to existing repository structure first. If no structure exists, prefer:
         service.yaml
         configmap.yaml
         secrets.example.yaml
-
-  data/
-    supervisor/
-      subagents.sqlite
 
   docs/
     adr/
@@ -382,20 +361,20 @@ Adapt to existing repository structure first. If no structure exists, prefer:
 ## Runtime and framework guidance
 
 1. Inspect the repo before introducing frameworks.
-2. Agent logic should prefer LangChain `create_deep_agent` / `create_agent` where container-compatible.
-3. If LangChain runtime is not practical for a boundary, expose HTTP via FastAPI.
-4. Use `uvicorn` as ASGI server for FastAPI services.
-5. Use one lifecycle-managed `httpx.AsyncClient` per process for outbound A2A calls.
+2. Browser chat traffic should enter through assistant-ui's AG-UI runtime and the AG-UI gateway.
+3. Agent Service owns the Coordinator/Dispatcher boundary and should use Google ADK when model
+   runtime configuration is present.
+4. Expose service boundaries via FastAPI.
+5. Use one lifecycle-managed `httpx.AsyncClient` per process for outbound service calls.
 6. Add dependencies incrementally.
 
 Recommended toolchain:
 
-* Agent runtime: LangChain (`create_deep_agent` / `create_agent`) when containerizable
+* Agent runtime: Google ADK coordinator behind Agent Service
+* Browser runtime: assistant-ui AG-UI `HttpAgent`
 * HTTP server shell: FastAPI
 * Pydantic: v2
 * Redis client: `redis.asyncio`
-* SQLite: `aiosqlite` (preferred async path)
-* Workflow durability: Temporal SDK
 * Tests: `pytest`, `pytest-asyncio`
 * Type checks: `mypy` + `pyright`
 * Lint/format: `ruff`
@@ -462,49 +441,7 @@ class AuthorizationBundle(BaseModel):
     proposals: list[ToolProposal] = Field(default_factory=list)
 ```
 
-### A2A envelope
-
-```python
-from __future__ import annotations
-
-from datetime import datetime, timezone
-from typing import Generic, TypeVar
-
-from pydantic import BaseModel, ConfigDict, Field
-
-PayloadT = TypeVar("PayloadT", bound=BaseModel)
-
-
-class A2AEnvelope(BaseModel, Generic[PayloadT]):
-    model_config = ConfigDict(extra="forbid")
-
-    message_id: str = Field(..., min_length=1)
-    idempotency_key: str = Field(..., min_length=1)
-
-    from_agent: str = Field(..., min_length=1)
-    to_agent: str = Field(..., min_length=1)
-
-    tenant_id: str | None = None
-    user_id: str = Field(..., min_length=1)
-    session_id: str = Field(..., min_length=1)
-    workflow_id: str | None = None
-
-    agentic_span_id: str = Field(..., min_length=1)
-    parent_agentic_span_id: str | None = None
-    trace_id: str | None = None
-
-    plan_hash: str | None = None
-    approval_id: str | None = None
-    step_id: str | None = None
-
-    auth_context_ref: str = Field(..., min_length=1)
-    obo_token_ref: str | None = None
-
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    payload: PayloadT
-```
-
-### Agent invocation context
+### Runtime request context
 
 ```python
 from __future__ import annotations
@@ -512,7 +449,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class AgentInvocationContext(BaseModel):
+class RuntimeRequestContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tenant_id: str | None = None
@@ -524,15 +461,14 @@ class AgentInvocationContext(BaseModel):
     parent_agentic_span_id: str | None = None
     trace_id: str | None = None
 
-    calling_agent: str = Field(..., min_length=1)
-    target_agent: str = Field(..., min_length=1)
+    thread_id: str | None = None
 
     plan_hash: str | None = None
     approval_id: str | None = None
     step_id: str | None = None
 
-    auth_context_ref: str = Field(..., min_length=1)
-    obo_token_ref: str | None = None
+    token_ref: str | None = None
+    allowed_tools: list[str] = Field(default_factory=list)
 
     idempotency_key: str = Field(..., min_length=1)
 ```
@@ -725,38 +661,17 @@ class WorkflowTokenExchangeResponse(BaseModel):
 
 ## Python interfaces
 
-```python
-from __future__ import annotations
+Current vNext interfaces are service-boundary specific:
 
-from typing import Protocol
+* Agent Service model-provider contracts live in `services/agent_service/agent_service/providers.py`.
+* Agent Service persistence contracts live in `services/agent_service/agent_service/state.py`.
+* Workflow/tool authorization contracts live in `packages/workflow_core/workflow_core/`.
+* Browser-safe session state contracts live in `packages/session_state/session_state/`.
+* OBO exchange contracts live in `packages/token_broker/token_broker/`.
+* MCP runtime auth/decorator contracts live in `packages/mcp_runtime/mcp_runtime/`.
 
-from agent_runtime.context import AgentInvocationContext
-from a2a_runtime.models import A2AEnvelope
-from workflow_core.models import WorkflowEvent
-from session_state.models import SessionState, WorkflowState
-from token_broker.models import WorkflowTokenExchangeRequest, WorkflowTokenExchangeResponse
-
-
-class AgentHandler(Protocol):
-    async def handle(self, ctx: AgentInvocationContext, envelope: A2AEnvelope) -> A2AEnvelope: ...
-
-
-class SessionStateStore(Protocol):
-    async def get_session(self, ctx: AgentInvocationContext) -> SessionState: ...
-    async def update_session(self, ctx: AgentInvocationContext, mutation: dict, expected_version: int | None = None) -> SessionState: ...
-    async def append_workflow_event(self, ctx: AgentInvocationContext, event: WorkflowEvent) -> None: ...
-    async def get_workflow(self, ctx: AgentInvocationContext, workflow_id: str) -> WorkflowState: ...
-    async def update_workflow(self, ctx: AgentInvocationContext, workflow_id: str, mutation: dict, expected_version: int | None = None) -> WorkflowState: ...
-
-
-class TokenBrokerClient(Protocol):
-    async def exchange_for_workflow_token(self, request: WorkflowTokenExchangeRequest) -> WorkflowTokenExchangeResponse: ...
-
-
-class WorkflowEventEmitter(Protocol):
-    async def emit_event(self, ctx: AgentInvocationContext, event: WorkflowEvent) -> None: ...
-    def start_span(self, ctx: AgentInvocationContext, name: str, attributes: dict[str, object] | None = None): ...
-```
+Do not recreate the removed A2A envelope layer or standalone `agent_runtime` package unless the
+architecture docs are updated to reintroduce that abstraction boundary.
 
 ---
 
@@ -788,8 +703,8 @@ Include tests proving equivalent plans produce the same hash.
 ## Deployment guidance (compose + containers)
 
 * Use a **shared Python base image** for all service Dockerfiles.
-* Add Redis and Temporal dependencies in local Compose.
-* Mount SQLite volume for supervisor discovery database.
+* Add Redis in local Compose for Agent Service state.
+* Keep Auth0 Management API credentials behind the supervisor service boundary.
 * Use editable installs for shared local packages in development containers.
 
 Example compose shape:
@@ -800,46 +715,54 @@ services:
     build:
       context: .
       dockerfile: services/supervisor/Dockerfile
-    volumes:
-      - ./data/supervisor:/data/supervisor
     environment:
-      - SUBAGENT_DB_PATH=/data/supervisor/subagents.sqlite
+      - AUTH0_DOMAIN=${AUTH0_DOMAIN}
+      - AUTH0_MANAGEMENT_CLIENT_ID=${AUTH0_MANAGEMENT_CLIENT_ID}
+      - AUTH0_MANAGEMENT_CLIENT_SECRET=${AUTH0_MANAGEMENT_CLIENT_SECRET}
     depends_on:
-      - redis
-      - temporal
+      - observability-sidecar
 
-  planner-agent:
+  frontend:
     build:
       context: .
-      dockerfile: services/agents/planner/Dockerfile
+      dockerfile: apps/frontend/Dockerfile
+    environment:
+      - AUTH0_DOMAIN=${AUTH0_DOMAIN}
+      - AUTH0_USER_CLIENT_ID=${AUTH0_USER_CLIENT_ID}
+      - AUTH0_SESSION_SECRET=${AUTH0_SESSION_SECRET}
     depends_on:
-      - redis
+      - ag-ui-gateway
+      - agent-service
 
-  developer-mcp:
+  ag-ui-gateway:
     build:
       context: .
-      dockerfile: services/mcps/developer_mcp/Dockerfile
+      dockerfile: services/ag_ui_gateway/Dockerfile
+    depends_on:
+      - agent-service
+
+  agent-service:
+    build:
+      context: .
+      dockerfile: services/agent_service/Dockerfile
+    depends_on:
+      - redis
+      - egress-gateway
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
-
-  temporal:
-    image: temporalio/auto-setup:latest
-    ports:
-      - "7233:7233"
 ```
 
 ---
 
-## Redis, Temporal, and observability guidance
+## Redis and observability guidance
 
 * Use `redis.asyncio` for low-latency state/cache operations.
 * Prefer Pydantic JSON for portability and schema evolution.
-* Use Redis for temporal cache and event buffering.
-* Use Temporal for durable workflow orchestration and retries.
-* Emit observability events via OpenTelemetry in addition to Redis temporal buffering.
+* Use Redis for thread, workflow, session, and event buffering.
+* Emit observability events via OpenTelemetry in addition to Redis-backed buffering.
 
 ---
 
@@ -854,44 +777,46 @@ Never log:
 * secrets
 * full sensitive payloads
 
-Given the requirement to return raw access tokens to callers, keep token lifetime short, transport over TLS only, and ensure logs always redact token material.
+Given the requirement to use raw access tokens behind server-side boundaries, keep token lifetime
+short, transport over TLS only, and ensure logs always redact token material. Do not expose raw
+tokens to browser-visible state.
 
 ---
 
-## Updated first implementation PR
+## Current implementation scope
 
-The first implementation PR should remain Python-only scaffolding and contracts.
+The active implementation is no longer Python-only scaffolding. It is a POC runtime with a
+Next.js assistant-ui frontend, AG-UI gateway, Agent Service, egress gateway, Network/Cloud MCP
+services, Redis-backed state, and supervisor-only Auth0 metadata loading.
 
 Scope:
 
 ```text
-- pyproject/uv setup if missing
-- shared package skeletons
-- Pydantic v2 models for A2A, workflow, session state, token broker, events, discovery
-- Protocol interfaces for A2A, state, token broker, observability, agent handlers
-- SQLite-backed supervisor subagent discovery layer
-- isolated MCP scaffolds (one MCP per subagent)
-- restricted decorator + scope materialization logic for plan-authorize-execute
-- deterministic plan hashing helper
-- basic validation tests
-- ADR documenting multi-container Agent Service architecture
-- docker-compose redis + temporal + sqlite volume scaffold
+- Auth0 Universal Login and signed httpOnly browser session cookie
+- browser-safe session DTOs without raw token context
+- AG-UI HTTP/SSE browser proxy through Next.js
+- Agent Service workflow planning, thread state, approval validation, OBO lookup, and egress delegation
+- Network/Cloud MCP scaffolds backed by shared mcp_runtime metadata
+- deterministic workflow plan hashing and scope materialization
+- broad Python and frontend validation gates
+- architecture docs documenting current service boundaries
 ```
 
 Acceptance criteria:
 
 ```text
-- Pydantic models validate required fields
-- invalid A2A envelopes fail validation
-- strict typed payload validation is enforced per action contract
-- supervisor can discover enabled subagents from SQLite
-- workflow planner can aggregate tool proposals and materialize deduplicated scopes
+- Pydantic models validate required fields across service boundaries
+- unauthenticated users are redirected to SSO before the assistant UI renders
+- browser-visible state excludes client secrets, raw tokens, authorization headers, and token endpoints
+- supervisor exposes only Auth0 metadata loading plus health
+- Agent Service can plan, restore, approve, and execute workflow state through typed APIs
 - workflow plan hashing is deterministic
-- no full business behavior implementation yet (scaffolding/contracts only)
-- tests pass locally
+- Python and frontend tests, lint, type checks, build, and Browser smoke tests pass locally
 ```
 
-The key design is unchanged: **Pydantic models are the contract layer**, enabling independent evolution of supervisor, agents, Redis/session layer, token broker, and observability components while supporting SQLite discovery and isolated MCP runtimes.
+The key design is unchanged: **Pydantic models are the contract layer**, enabling independent
+evolution of frontend proxies, AG-UI gateway, Agent Service, Redis/session layer, token broker,
+MCP runtime, egress gateway, and observability components.
 
 ---
 
@@ -958,4 +883,3 @@ Before final integration complete, verify:
 * scope templates from MCP tool metadata are materialized deterministically
 * authorization bundle scopes are deduplicated and token exchange request is formed
 * approved workflows execute in step order with event emission and state updates
-
