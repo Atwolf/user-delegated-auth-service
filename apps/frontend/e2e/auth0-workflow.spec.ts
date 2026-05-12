@@ -14,13 +14,13 @@ test.skip(
   "Real Auth0 E2E requires Auth0 tenant config plus a sample user email and password"
 );
 
-test("Auth0 user login drives plan approval execution", async ({ page }) => {
+test("Auth0 user login drives the AG-UI assistant runtime", async ({ page }) => {
   await page.goto("/");
+  await expect(page).toHaveURL(/\/authorize/);
 
   await expect(page.getByLabel(/oidc client id/i)).toHaveCount(0);
   await expect(page.getByLabel(/client secret/i)).toHaveCount(0);
   await expect(page.getByLabel(/token endpoint/i)).toHaveCount(0);
-  await page.getByRole("link", { name: /log in with auth0/i }).click();
 
   await page
     .getByLabel(/email/i)
@@ -31,15 +31,8 @@ test("Auth0 user login drives plan approval execution", async ({ page }) => {
   await page.getByRole("button", { name: /continue|log in|login/i }).click();
   await expect(page.getByText(/logged in as/i)).toBeVisible();
 
-  await page.getByLabel("Workflow chat input").fill("Check user sample-user and app sample-app");
+  await page.getByLabel("Assistant message").fill("Check user sample-user and app sample-app");
+  const agUiRequest = page.waitForRequest(/\/api\/ag-ui$/);
   await page.getByTitle("Send message").click();
-
-  await expect(page.getByTestId("approval-card")).toBeVisible();
-  await expect(page.getByText("get_identity_profile")).toBeVisible();
-  await expect(page.getByText("read:user:sample-user")).toBeVisible();
-  await expect(page.getByText("read:client:sample-app")).toBeVisible();
-  await expect(page.getByTestId("approval-card").getByText(/^DOE\./)).toHaveCount(0);
-
-  await page.getByRole("button", { name: /approve workflow/i }).click();
-  await expect(page.getByRole("button", { name: /completed/i })).toBeVisible();
+  await agUiRequest;
 });

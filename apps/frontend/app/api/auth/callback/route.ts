@@ -6,16 +6,18 @@ import {
   sessionMaxAgeSeconds,
   type Auth0Transaction
 } from "@/lib/server/auth0-oidc";
+import type { Auth0ServerSession, Auth0UserSession } from "@/lib/auth0-config";
 import {
   AUTH0_SESSION_COOKIE,
   AUTH0_TRANSACTION_COOKIE,
   cookieOptions,
+  createAuth0SessionCookieValue,
   createSessionId,
-  createSignedCookieValue,
   expiredCookieOptions,
   getCookieValue,
   readSignedCookieValue
 } from "@/lib/server/auth0-session";
+import { registerAgentAuthContext } from "@/lib/server/supervisor";
 
 export const dynamic = "force-dynamic";
 
@@ -57,11 +59,12 @@ export async function GET(req: Request) {
 
   try {
     const session = await exchangeCodeForSession(config, transaction, code, createSessionId());
+    await registerAgentAuthContext(session);
     const maxAge = sessionMaxAgeSeconds(session);
     const response = NextResponse.redirect(new URL(transaction.returnTo, config.appBaseUrl));
     response.cookies.set(
       AUTH0_SESSION_COOKIE,
-      createSignedCookieValue(session, maxAge),
+      createAuth0SessionCookieValue(browserSession(session), maxAge),
       cookieOptions(maxAge)
     );
     response.cookies.set(AUTH0_TRANSACTION_COOKIE, "", expiredCookieOptions());
@@ -70,6 +73,21 @@ export async function GET(req: Request) {
     const message = error instanceof Error ? error.message : "Auth0 user login failed";
     return redirectWithError(config, message);
   }
+}
+
+function browserSession(session: Auth0ServerSession): Auth0UserSession {
+  return {
+    allowedTools: session.allowedTools,
+    audience: session.audience,
+    expiresAt: session.expiresAt,
+    persona: session.persona,
+    scope: session.scope,
+    sessionId: session.sessionId,
+    tenantId: session.tenantId ?? null,
+    tokenRef: session.tokenRef,
+    userEmail: session.userEmail,
+    userId: session.userId
+  };
 }
 
 function redirectWithError(

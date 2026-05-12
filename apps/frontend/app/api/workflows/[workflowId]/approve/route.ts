@@ -1,25 +1,40 @@
 import { NextResponse } from "next/server";
-import { getWorkflow, rememberWorkflow } from "@/lib/server/workflow-store";
-import { approveWorkflow } from "@/lib/server/supervisor";
 import { readAuth0SessionCookie } from "@/lib/server/auth0-session";
+import { approveAgentWorkflow } from "@/lib/server/supervisor";
 
-type Context = {
+type RouteContext = {
   params: Promise<{ workflowId: string }>;
 };
 
-export async function POST(req: Request, context: Context) {
-  const { workflowId } = await context.params;
-  const session = readAuth0SessionCookie(req.headers.get("cookie"));
+export async function POST(request: Request, context: RouteContext) {
+  const session = readAuth0SessionCookie(request.headers.get("cookie"));
   if (!session) {
     return NextResponse.json({ error: "Auth0 user login is required" }, { status: 401 });
   }
 
-  const cached = getWorkflow(workflowId);
-  if (!cached) {
-    return NextResponse.json({ error: "workflow not found" }, { status: 404 });
+  const payload = await request.json().catch(() => ({}));
+  if (!isRecord(payload)) {
+    return NextResponse.json({ error: "Approval payload must be an object" }, { status: 400 });
   }
 
-  const workflow = await approveWorkflow(workflowId, cached.plan_hash, session);
-  rememberWorkflow(workflow);
-  return NextResponse.json({ workflow });
+  const approved = payload.approved;
+  const planHash = payload.plan_hash ?? payload.planHash;
+  if (typeof approved !== "boolean") {
+    return NextResponse.json({ error: "approved must be a boolean" }, { status: 400 });
+  }
+  if (typeof planHash !== "string" || planHash.length === 0) {
+    return NextResponse.json({ error: "plan_hash is required" }, { status: 400 });
+  }
+
+  const { workflowId } = await context.params;
+  const approval = await approveAgentWorkflow(workflowId, session, {
+    approved,
+    planHash
+  });
+
+  return NextResponse.json(approval);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

@@ -5,7 +5,7 @@ import {
   verify as verifySignature
 } from "node:crypto";
 import type { JsonWebKey as NodeJsonWebKey } from "node:crypto";
-import type { Auth0UserSession } from "@/lib/auth0-config";
+import type { Auth0ServerSession, Auth0UserSession } from "@/lib/auth0-config";
 import { loadAuth0UserSession } from "@/lib/server/supervisor";
 
 export type Auth0Transaction = {
@@ -50,6 +50,7 @@ type JwtClaims = Record<string, unknown> & {
   name?: string;
   nickname?: string;
   nonce?: string;
+  org_id?: string;
   permissions?: string[];
   scope?: string;
   sub?: string;
@@ -90,7 +91,7 @@ export function createAuth0Transaction(returnTo = "/"): Auth0Transaction {
     state: randomToken(),
     nonce: randomToken(),
     codeVerifier: randomToken(48),
-    returnTo: returnTo.startsWith("/") ? returnTo : "/"
+    returnTo: safeReturnTo(returnTo)
   };
 }
 
@@ -116,7 +117,7 @@ export async function exchangeCodeForSession(
   transaction: Auth0Transaction,
   code: string,
   sessionId: string
-): Promise<Auth0UserSession> {
+): Promise<Auth0ServerSession> {
   const tokenResponse = await exchangeAuthorizationCode(config, transaction, code);
   const accessToken = requiredTokenValue(tokenResponse.access_token, "access_token");
   const idToken = requiredTokenValue(tokenResponse.id_token, "id_token");
@@ -147,6 +148,7 @@ export async function exchangeCodeForSession(
     audience: config.audience,
     expiresAt: expiresIn ? Date.now() + expiresIn * 1000 : null,
     sessionId,
+    tenantId: tenantIdFromClaims(idClaims, accessClaims),
     tokenRef,
     tokenScopes: collectScopes(tokenResponse, accessClaims),
     userEmail: idClaims.email ?? null,
@@ -184,6 +186,13 @@ function normalizeDomain(domain: string): string {
 
 function normalizeBaseUrl(value: string): string {
   return value.replace(/\/+$/, "");
+}
+
+function safeReturnTo(value: string): string {
+  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\")) {
+    return "/";
+  }
+  return value;
 }
 
 function normalizeScope(scope: string): string {
@@ -287,6 +296,21 @@ function collectScopes(tokenResponse: Auth0TokenResponse, accessClaims: JwtClaim
   if (typeof accessClaims.scope === "string") scopes.push(...accessClaims.scope.split(/\s+/));
   if (Array.isArray(accessClaims.permissions)) scopes.push(...accessClaims.permissions);
   return [...new Set(scopes.map((scope) => scope.trim()).filter(Boolean))].sort();
+}
+
+function tenantIdFromClaims(idClaims: JwtClaims, accessClaims: JwtClaims): string | null {
+  const value =
+    stringClaim(idClaims, "org_id", "organization_id", "tenant_id") ??
+    stringClaim(accessClaims, "org_id", "organization_id", "tenant_id");
+  return value && value.trim() ? value.trim() : null;
+}
+
+function stringClaim(claims: JwtClaims, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const value = claims[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
 }
 
 function auth0ResponseDetail(status: number, payload: Record<string, unknown>): string {
