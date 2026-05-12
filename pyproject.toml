@@ -5,14 +5,14 @@ description = "Python contract scaffold for a multi-agent workflow service."
 readme = "CODEX_PROMPT.md"
 requires-python = ">=3.11"
 dependencies = [
-    "aiosqlite>=0.20.0",
+    "anthropic>=0.43.0",
     "fastapi>=0.115.0",
     "fastmcp>=2.0.0",
+    "google-adk>=1.32.0",
     "httpx>=0.27.0",
     "opentelemetry-api>=1.27.0",
     "pydantic>=2.8.0",
     "redis>=5.0.0",
-    "temporalio>=1.8.0",
     "uvicorn>=0.30.0",
 ]
 
@@ -31,8 +31,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = [
-    "packages/a2a_runtime",
-    "packages/agent_runtime",
     "packages/mcp_runtime",
     "packages/observability",
     "packages/session_state",
@@ -40,37 +38,21 @@ where = [
     "packages/workflow_core",
     "services/ag_ui_gateway",
     "services/agent_service",
-    "services/chainlit_middleware",
     "services/egress_gateway",
-    "services/agents/authorizer",
-    "services/agents/executor",
-    "services/agents/planner",
-    "services/mcps/billing_mcp",
     "services/mcps/cloud_mcp",
-    "services/mcps/developer_mcp",
-    "services/mcps/identity_mcp",
     "services/mcps/network_mcp",
     "services/observability_sidecar",
     "services/supervisor",
 ]
 include = [
-    "a2a_runtime*",
     "ag_ui_gateway*",
-    "agent_runtime*",
     "agent_service*",
-    "authorizer_agent*",
-    "billing_mcp*",
-    "chainlit_middleware*",
     "cloud_mcp*",
-    "developer_mcp*",
     "egress_gateway*",
-    "executor_agent*",
-    "identity_mcp*",
     "mcp_runtime*",
     "network_mcp*",
     "observability*",
     "observability_sidecar*",
-    "planner_agent*",
     "session_state*",
     "token_broker*",
     "workflow_core*",
@@ -81,8 +63,6 @@ include = [
 addopts = "-q --import-mode=importlib"
 asyncio_mode = "auto"
 pythonpath = [
-    "packages/a2a_runtime",
-    "packages/agent_runtime",
     "packages/mcp_runtime",
     "packages/observability",
     "packages/session_state",
@@ -90,15 +70,8 @@ pythonpath = [
     "packages/workflow_core",
     "services/ag_ui_gateway",
     "services/agent_service",
-    "services/chainlit_middleware",
     "services/egress_gateway",
-    "services/agents/authorizer",
-    "services/agents/executor",
-    "services/agents/planner",
-    "services/mcps/billing_mcp",
     "services/mcps/cloud_mcp",
-    "services/mcps/developer_mcp",
-    "services/mcps/identity_mcp",
     "services/mcps/network_mcp",
     "services/observability_sidecar",
     "services/supervisor",
@@ -120,8 +93,6 @@ select = ["ASYNC", "B", "E", "F", "I", "UP"]
 python_version = "3.11"
 strict = true
 mypy_path = [
-    "packages/a2a_runtime",
-    "packages/agent_runtime",
     "packages/mcp_runtime",
     "packages/observability",
     "packages/session_state",
@@ -129,15 +100,8 @@ mypy_path = [
     "packages/workflow_core",
     "services/ag_ui_gateway",
     "services/agent_service",
-    "services/chainlit_middleware",
     "services/egress_gateway",
-    "services/agents/authorizer",
-    "services/agents/executor",
-    "services/agents/planner",
-    "services/mcps/billing_mcp",
     "services/mcps/cloud_mcp",
-    "services/mcps/developer_mcp",
-    "services/mcps/identity_mcp",
     "services/mcps/network_mcp",
     "services/observability_sidecar",
     "services/supervisor",
@@ -145,12 +109,8 @@ mypy_path = [
 exclude = ["worktrees/", ".*/tests/", "apps/frontend/node_modules/"]
 
 [[tool.mypy.overrides]]
-module = ["fastmcp.*", "redis.*", "temporalio.*"]
+module = ["fastmcp.*", "redis.*"]
 ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = ["billing_mcp.tools", "developer_mcp.tools", "identity_mcp.tools"]
-disallow_untyped_decorators = false
 
 [tool.pyright]
 pythonVersion = "3.11"
@@ -158,6 +118,7 @@ typeCheckingMode = "strict"
 exclude = [
     "worktrees",
     ".venv",
+    ".uv-cache",
     "apps/frontend/node_modules",
     "apps/frontend/.next",
     "apps/frontend/test-results",
@@ -169,8 +130,6 @@ ignore = [
 ]
 reportUnusedFunction = "none"
 extraPaths = [
-    "packages/a2a_runtime",
-    "packages/agent_runtime",
     "packages/mcp_runtime",
     "packages/observability",
     "packages/session_state",
@@ -178,15 +137,8 @@ extraPaths = [
     "packages/workflow_core",
     "services/ag_ui_gateway",
     "services/agent_service",
-    "services/chainlit_middleware",
     "services/egress_gateway",
-    "services/agents/authorizer",
-    "services/agents/executor",
-    "services/agents/planner",
-    "services/mcps/billing_mcp",
     "services/mcps/cloud_mcp",
-    "services/mcps/developer_mcp",
-    "services/mcps/identity_mcp",
     "services/mcps/network_mcp",
     "services/observability_sidecar",
     "services/supervisor",

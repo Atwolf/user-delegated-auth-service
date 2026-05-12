@@ -1,4 +1,5 @@
 .venv/
+.uv-cache/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
@@ -19,3 +20,4 @@ apps/frontend/node_modules/
 apps/frontend/test-results/
 apps/frontend/playwright-report/
 worktrees/
+.env
