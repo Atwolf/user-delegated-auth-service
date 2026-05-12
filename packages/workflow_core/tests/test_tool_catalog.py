@@ -23,13 +23,13 @@ def test_known_tool_authorization_metadata_is_centralized() -> None:
     assert authz.blast_radius == "low"
 
 
-def test_unknown_tool_uses_inspect_scope_requirement() -> None:
-    requirements = scope_requirements_for_tool("unregistered_tool")
-
-    assert len(requirements) == 1
-    assert requirements[0].scope_template == "read:workflow"
-    assert requirements[0].scope_args == []
-    assert requirements[0].hitl_description == "Inspect the user request for workflow planning"
+def test_unknown_tool_authorization_fails_closed() -> None:
+    try:
+        scope_requirements_for_tool("unregistered_tool")
+    except KeyError as exc:
+        assert exc.args == ("unregistered_tool",)
+    else:
+        raise AssertionError("unknown tools must not be remapped to a fallback contract")
 
 
 def test_auth0_issued_scopes_are_selected_for_known_tool() -> None:

@@ -8,6 +8,7 @@ from workflow_core import ApprovedWorkflow, WorkflowPlan, WorkflowStatus, Workfl
 
 __all__ = [
     "ApprovedWorkflow",
+    "AgUiThreadState",
     "SessionState",
     "WorkflowPlan",
     "WorkflowState",
@@ -26,6 +27,10 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def empty_ag_ui_messages() -> list[dict[str, Any]]:
+    return []
+
+
 class SessionState(BaseModel):
     model_config = STRICT_MODEL_CONFIG
 
@@ -33,11 +38,43 @@ class SessionState(BaseModel):
     user_id: str = Field(..., min_length=1)
     session_id: str = Field(..., min_length=1)
 
-    auth_context_ref: str = Field(..., min_length=1)
+    token_ref: str | None = Field(default=None, min_length=1)
+    auth_context_ref: str | None = Field(
+        default=None,
+        min_length=1,
+        exclude=True,
+        repr=False,
+    )
     active_workflow_id: str | None = None
 
     version: int = Field(default=0, ge=0)
     values: dict[str, Any] = Field(default_factory=dict)
+
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class AgUiThreadState(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+
+    tenant_id: str | None = None
+    user_id: str = Field(..., min_length=1)
+    session_id: str = Field(..., min_length=1)
+    thread_id: str = Field(..., min_length=1)
+
+    messages: list[dict[str, Any]] = Field(default_factory=empty_ag_ui_messages)
+    state: dict[str, Any] = Field(default_factory=dict)
+
+    token_ref: str | None = Field(default=None, min_length=1)
+    auth_context_ref: str | None = Field(
+        default=None,
+        min_length=1,
+        exclude=True,
+        repr=False,
+    )
+
+    active_workflow_id: str | None = None
+    version: int = Field(default=0, ge=0)
 
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)

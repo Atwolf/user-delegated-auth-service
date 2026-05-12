@@ -15,6 +15,13 @@ _TOKEN_ASSIGNMENT = re.compile(
     r"([^\"'\s,;&}]+)",
     re.IGNORECASE,
 )
+_SENSITIVE_LABEL_VALUE = re.compile(
+    r"\b(authorization|proxy[_ -]?authorization|"
+    r"(?:access|refresh|id|auth|bearer)[_-]?token|client[_-]?secret|api[_-]?key)"
+    r"(\s+)"
+    r"([^\"'\s,;&}]{10,})",
+    re.IGNORECASE,
+)
 _AUTH_SCHEME = re.compile(r"\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
 _JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")
 
@@ -65,7 +72,11 @@ def is_sensitive_key(key: object) -> bool:
 def redact_string(value: str) -> str:
     redacted = _AUTH_SCHEME.sub(lambda match: f"{match.group(1)} {REDACTED}", value)
     redacted = _JWT.sub(REDACTED, redacted)
-    return _TOKEN_ASSIGNMENT.sub(
+    redacted = _TOKEN_ASSIGNMENT.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}{REDACTED}",
+        redacted,
+    )
+    return _SENSITIVE_LABEL_VALUE.sub(
         lambda match: f"{match.group(1)}{match.group(2)}{REDACTED}",
         redacted,
     )

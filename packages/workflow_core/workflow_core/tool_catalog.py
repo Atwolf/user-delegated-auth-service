@@ -130,18 +130,8 @@ TOOL_AUTHORIZATION_CATALOG: dict[str, ToolAuthorizationSpec] = {
     ),
 }
 
-INSPECT_REQUEST_AUTHORIZATION = ToolAuthorizationSpec(
-    tool_name="inspect_request",
-    auth0_scope_candidates=("read:workflow",),
-    workflow_scope_templates=("read:workflow",),
-    scope_args=(),
-    op="READ",
-    hitl_description="Inspect the user request for workflow planning",
-)
-
-
 def get_tool_authorization(tool_name: str) -> ToolAuthorizationSpec:
-    return TOOL_AUTHORIZATION_CATALOG.get(tool_name, INSPECT_REQUEST_AUTHORIZATION)
+    return TOOL_AUTHORIZATION_CATALOG[tool_name]
 
 
 def scope_requirements_for_tool(tool_name: str) -> list[ScopeRequirement]:

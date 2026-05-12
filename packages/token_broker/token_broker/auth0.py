@@ -115,16 +115,23 @@ class Auth0OnBehalfOfClient:
         response_payload = cast(dict[str, Any], response.json())
         access_token = _required_string(response_payload, "access_token")
         expires_in = response_payload.get("expires_in")
-        raw_scope = response_payload.get("scope")
-        scopes = (
-            _parse_scope_string(raw_scope)
-            if isinstance(raw_scope, str) and raw_scope.strip()
-            else tuple(request.requested_scopes)
+        expected_audience = request.requested_audience or config.audience
+        scopes = _scopes_from_response(
+            payload=response_payload,
+            access_token=access_token,
+            requested_scopes=(),
         )
+        audience = _audience_from_response(
+            payload=response_payload,
+            access_token=access_token,
+            expected_audience=expected_audience,
+        )
+        if audience != expected_audience:
+            raise ValueError("Auth0 token response audience does not match requested audience")
         return WorkflowTokenExchangeResponse(
             access_token=access_token,
             scopes=list(scopes),
-            audience=request.requested_audience or config.audience,
+            audience=audience,
             expires_at=_expires_at(expires_in if isinstance(expires_in, int) else None),
         )
 
@@ -173,26 +180,16 @@ def _scopes_from_response(
 
 
 def _scopes_from_unverified_jwt(access_token: str) -> tuple[str, ...]:
-    parts = access_token.split(".")
-    if len(parts) < 2:
+    claims = _claims_from_unverified_jwt(access_token)
+    if claims is None:
         return ()
 
-    try:
-        payload_bytes = urlsafe_b64decode(_with_base64_padding(parts[1]))
-        claims = json.loads(payload_bytes.decode("utf-8"))
-    except (Base64DecodeError, UnicodeError, json.JSONDecodeError):
-        return ()
-
-    if not isinstance(claims, dict):
-        return ()
-
-    claim_values = cast(dict[str, object], claims)
     scopes: list[str] = []
-    raw_scope = claim_values.get("scope")
+    raw_scope = claims.get("scope")
     if isinstance(raw_scope, str) and raw_scope.strip():
         scopes.extend(_parse_scope_string(raw_scope))
 
-    raw_permissions = claim_values.get("permissions")
+    raw_permissions = claims.get("permissions")
     if isinstance(raw_permissions, list):
         permissions = cast(list[object], raw_permissions)
         scopes.extend(
@@ -200,6 +197,54 @@ def _scopes_from_unverified_jwt(access_token: str) -> tuple[str, ...]:
         )
 
     return tuple(dict.fromkeys(scope.strip() for scope in scopes if scope.strip()))
+
+
+def _audience_from_response(
+    *,
+    payload: dict[str, Any],
+    access_token: str,
+    expected_audience: str,
+) -> str | None:
+    candidates = _audience_candidates(payload.get("audience") or payload.get("aud"))
+    claims = _claims_from_unverified_jwt(access_token)
+    if claims is not None:
+        candidates.extend(_audience_candidates(claims.get("aud")))
+
+    deduped = list(dict.fromkeys(candidate for candidate in candidates if candidate))
+    if expected_audience in deduped:
+        return expected_audience
+    if len(deduped) == 1:
+        return deduped[0]
+    return None
+
+
+def _audience_candidates(value: object) -> list[str]:
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    if isinstance(value, list):
+        return [
+            item.strip()
+            for item in cast(list[object], value)
+            if isinstance(item, str) and item.strip()
+        ]
+    return []
+
+
+def _claims_from_unverified_jwt(access_token: str) -> dict[str, object] | None:
+    parts = access_token.split(".")
+    if len(parts) < 2:
+        return None
+
+    try:
+        payload_bytes = urlsafe_b64decode(_with_base64_padding(parts[1]))
+        claims = json.loads(payload_bytes.decode("utf-8"))
+    except (Base64DecodeError, UnicodeError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(claims, dict):
+        return None
+
+    return cast(dict[str, object], claims)
 
 
 def _with_base64_padding(value: str) -> bytes:
