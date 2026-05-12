@@ -1,5 +1,9 @@
 name: magnum-opus-minified-agui-agent
 
+x-backend-build: &backend-build
+  context: .
+  dockerfile: backend.Dockerfile
+
 services:
   python-base:
     image: python-base
@@ -11,8 +15,11 @@ services:
 
   ag-ui-gateway:
     build:
-      context: .
-      dockerfile: services/ag_ui_gateway/Dockerfile
+      <<: *backend-build
+      args:
+        SERVICE_PATH: ag_ui_gateway
+        SERVICE_MODULE: ag_ui_gateway_simple.app
+        SERVICE_PORT: "8088"
     environment:
       AGENT_SERVICE_URL: http://agent-service:8090
     ports:
@@ -23,8 +30,11 @@ services:
 
   agent-service:
     build:
-      context: .
-      dockerfile: services/agent_service/Dockerfile
+      <<: *backend-build
+      args:
+        SERVICE_PATH: agent_service
+        SERVICE_MODULE: agent_service_simple.app
+        SERVICE_PORT: "8090"
     environment:
       REDIS_URL: redis://redis:6379/0
       AGENT_SERVICE_RUNTIME_MODE: ${AGENT_SERVICE_RUNTIME_MODE:-auto}

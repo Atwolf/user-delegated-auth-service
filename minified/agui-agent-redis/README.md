@@ -46,7 +46,7 @@ Research inputs used for this shape:
 
 ## Run
 
-Build the shared `python-base` image first, then build and start the three runtime containers:
+Build the shared `python-base` image first, then build and start the three runtime containers. Both backend services use `backend.Dockerfile`; Compose supplies only the service module, service path, and port as build args, so there are no per-service Dockerfiles in this minified stack.
 
 ```bash
 cd minified/agui-agent-redis
@@ -99,3 +99,14 @@ npm run dev
 Open `http://127.0.0.1:5173`. The Vite dev server proxies `/agent` to the AG-UI gateway at `http://127.0.0.1:18088`, so the browser never receives the Anthropic API key or any other model-provider credential.
 
 The gateway is published on host port `18088` and the Agent Service on host port `18090` by default to avoid collisions with the full local stack. Override `AG_UI_GATEWAY_HOST_PORT`, `VITE_AG_UI_GATEWAY_URL`, or `AGENT_SERVICE_HOST_PORT` if needed.
+
+## Windows Local Start Without Docker
+
+On Windows, the minified stack can run without Docker when Redis is available locally. The script loads `.env` from this folder, checks for `uv`, `npm`, Windows Terminal, and Redis, then opens separate tabs for the Agent Service, AG-UI gateway, and React frontend:
+
+```powershell
+cd minified\agui-agent-redis
+pwsh -ExecutionPolicy Bypass -File .\scripts\start-local.ps1
+```
+
+Docker-free startup requires Redis at `REDIS_URL` or `redis-server` on `PATH`. If Redis is not already running and `redis-server` is not available, the script stops before launching the app.
