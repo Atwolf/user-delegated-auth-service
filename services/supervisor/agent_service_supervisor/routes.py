@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-from datetime import UTC, datetime
 from typing import Annotated, Any, cast
 from urllib.parse import quote
 from uuid import uuid4
@@ -10,84 +8,31 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from observability.models import WorkflowEvent
 from observability.sidecar_client import ObservabilitySidecarClient
-from workflow_core import (
-    ApprovedWorkflow,
-    AuthorizationBundle,
-    ScopeMaterializationError,
-    ToolProposal,
-    WorkflowPlan,
-    WorkflowStatus,
-    WorkflowStep,
-    materialize_scopes_for_proposal,
-    plan_hash,
-    scope_requirements_for_auth0_token,
-    scope_requirements_for_tool,
+from session_state import (
+    SESSION_CONTEXT_HEADER,
+    SESSION_CONTEXT_SIGNATURE_HEADER,
+    InternalAuthError,
+    TrustedSessionContext,
+    verify_session_context,
 )
 
 from agent_service_supervisor.config import SupervisorSettings
-from agent_service_supervisor.discovery_sqlite import (
-    SubagentDiscoveryService,
-    SubagentRecord,
-)
 from agent_service_supervisor.workflow_api_models import (
     Auth0UserSessionMetadataRequest,
     Auth0UserSessionMetadataResult,
     UserPersona,
-    WorkflowApprovalRequest,
-    WorkflowPlanRequest,
-    WorkflowRecord,
-    WorkflowTimelineEvent,
 )
-from agent_service_supervisor.workflow_orchestrator import WorkflowOrchestrator
 
 router = APIRouter()
-ORCHESTRATION_TOOL_NAMES = frozenset({"inspect_request", "propose_workflow_plan"})
-WorkflowStore = dict[str, WorkflowRecord]
-
-
-def get_discovery_service(request: Request) -> SubagentDiscoveryService:
-    return cast(SubagentDiscoveryService, request.app.state.subagent_discovery)
 
 
 def get_settings(request: Request) -> SupervisorSettings:
     return cast(SupervisorSettings, request.app.state.settings)
 
 
-def get_workflow_orchestrator(request: Request) -> WorkflowOrchestrator:
-    return cast(WorkflowOrchestrator, request.app.state.workflow_orchestrator)
-
-
-def get_workflow_store(request: Request) -> WorkflowStore:
-    return cast(WorkflowStore, request.app.state.workflow_store)
-
-
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
-
-
-@router.get("/subagents", response_model=list[SubagentRecord])
-async def list_subagents(
-    request: Request,
-    discovery: Annotated[SubagentDiscoveryService, Depends(get_discovery_service)],
-) -> list[SubagentRecord]:
-    cached = getattr(request.app.state, "enabled_subagents", None)
-    if cached is not None:
-        return cast(list[SubagentRecord], cached)
-
-    records = await discovery.load_enabled_subagents()
-    request.app.state.enabled_subagents = records
-    return records
-
-
-@router.post("/subagents/refresh", response_model=list[SubagentRecord])
-async def refresh_subagents(
-    request: Request,
-    discovery: Annotated[SubagentDiscoveryService, Depends(get_discovery_service)],
-) -> list[SubagentRecord]:
-    records = await discovery.refresh_enabled_subagents()
-    request.app.state.enabled_subagents = records
-    return records
 
 
 @router.post(
@@ -96,8 +41,12 @@ async def refresh_subagents(
 )
 async def load_auth0_user_session_metadata(
     request: Auth0UserSessionMetadataRequest,
+    http_request: Request,
     settings: Annotated[SupervisorSettings, Depends(get_settings)],
 ) -> Auth0UserSessionMetadataResult:
+    trusted_context = _trusted_context_from_request(http_request, settings)
+    _assert_metadata_request_matches_trusted_context(request, trusted_context)
+
     await _emit_sidecar_event(
         settings=settings,
         event_type="frontend.auth0_user_login_succeeded",
@@ -116,9 +65,8 @@ async def load_auth0_user_session_metadata(
             user_id=request.user_id,
         )
 
-    metadata_scopes = _metadata_string_list(metadata, "allowed_scopes")
-    metadata_tools = _metadata_string_list(metadata, "allowed_mcp_tools")
-    issued_scopes = metadata_scopes or request.token_scopes
+    issued_scopes = _required_metadata_string_list(metadata, "allowed_scopes")
+    metadata_tools = _required_metadata_string_list(metadata, "allowed_mcp_tools")
     persona = _build_user_persona(
         claims={"name": request.user_name} if request.user_name else {},
         id_claims={"email": request.user_email} if request.user_email else {},
@@ -166,241 +114,41 @@ async def load_auth0_user_session_metadata(
     )
 
 
-@router.post("/workflows/plan", response_model=WorkflowRecord)
-async def plan_workflow(
-    request: WorkflowPlanRequest,
-    settings: Annotated[SupervisorSettings, Depends(get_settings)],
-    discovery: Annotated[SubagentDiscoveryService, Depends(get_discovery_service)],
-    orchestrator: Annotated[WorkflowOrchestrator, Depends(get_workflow_orchestrator)],
-    store: Annotated[WorkflowStore, Depends(get_workflow_store)],
-) -> WorkflowRecord:
-    workflow_id = f"wf-{uuid4().hex}"
-    subagents = await discovery.load_enabled_subagents()
-    discovered_proposals = [
-        ToolProposal.model_validate(proposal)
-        for proposal in await orchestrator.request_tool_proposals(
-            user_query=request.question,
-            user_id=request.user_id,
-            session_id=request.session_id,
-            subagents=subagents,
-        )
-    ]
-    proposals = _filter_proposals_by_allowed_tools(
-        discovered_proposals,
-        request.allowed_tools,
-    )
-    steps = [
-        _step_from_proposal(index, proposal, request.token_scopes)
-        for index, proposal in enumerate(proposals, 1)
-    ]
-    plan = WorkflowPlan(
-        workflow_id=workflow_id,
-        user_id=request.user_id,
-        session_id=request.session_id,
-        tenant_id=request.tenant_id,
-        steps=steps,
-    )
-    hashed_plan = plan_hash(plan)
-    authorization = orchestrator.build_authorization_bundle(
-        workflow_id=workflow_id,
-        proposals=proposals,
-        scopes=[scope for step in steps for scope in step.required_scopes],
-    )
-    record = WorkflowRecord(
-        workflow_id=workflow_id,
-        status=WorkflowStatus(status="awaiting_approval"),
-        plan=plan,
-        plan_hash=hashed_plan,
-        authorization=AuthorizationBundle.model_validate(authorization),
-        events=[
-            WorkflowTimelineEvent(
-                event_type="workflow.planned",
-                message="Supervisor planned a workflow manifest from subagent proposals.",
-                attributes={
-                    "proposal_count": len(proposals),
-                    "filtered_proposal_count": len(discovered_proposals) - len(proposals),
-                    "token_ref": request.token_ref,
-                    "issued_scope_count": len(request.token_scopes),
-                },
-            ),
-            WorkflowTimelineEvent(
-                event_type="workflow.awaiting_approval",
-                message="Workflow manifest is awaiting human approval.",
-                attributes={"required_scopes": authorization.scopes},
-            ),
-        ],
-    )
-    store[workflow_id] = record
-
-    await _emit_sidecar_event(
-        settings=settings,
-        event_type="workflow.planned",
-        user_id=request.user_id,
-        session_id=request.session_id,
-        tenant_id=request.tenant_id,
-        workflow_id=workflow_id,
-        plan_hash=hashed_plan,
-        attributes={
-            "proposal_count": len(proposals),
-            "filtered_proposal_count": len(discovered_proposals) - len(proposals),
-            "token_ref": request.token_ref,
-            "issued_scope_count": len(request.token_scopes),
-        },
-    )
-    await _emit_sidecar_event(
-        settings=settings,
-        event_type="workflow.awaiting_approval",
-        user_id=request.user_id,
-        session_id=request.session_id,
-        tenant_id=request.tenant_id,
-        workflow_id=workflow_id,
-        plan_hash=hashed_plan,
-        attributes={"required_scopes": authorization.scopes},
-    )
-
-    return record
-
-
-@router.post("/workflows/{workflow_id}/approve", response_model=WorkflowRecord)
-async def approve_workflow(
-    workflow_id: str,
-    request: WorkflowApprovalRequest,
-    settings: Annotated[SupervisorSettings, Depends(get_settings)],
-    store: Annotated[WorkflowStore, Depends(get_workflow_store)],
-) -> WorkflowRecord:
-    record = _require_workflow(store, workflow_id)
-    if request.plan_hash != record.plan_hash:
-        raise HTTPException(status_code=409, detail="plan_hash does not match workflow manifest")
-
-    if not request.approved:
-        updated = _append_event(
-            record.model_copy(update={"status": WorkflowStatus(status="cancelled")}),
-            event_type="workflow.cancelled",
-            message="Workflow approval was declined.",
-            attributes={"approved": False},
-        )
-        store[workflow_id] = updated
-        return updated
-
-    approval = ApprovedWorkflow(
-        workflow_id=workflow_id,
-        approval_id=f"approval:{workflow_id}",
-        plan_hash=record.plan_hash,
-        approved_by_user_id=request.approved_by_user_id,
-        approved_scopes=record.authorization.scopes,
-    )
-    approved = _append_event(
-        record.model_copy(
-            update={
-                "status": WorkflowStatus(status="approved"),
-                "approved_workflow": approval,
-            }
-        ),
-        event_type="workflow.approved",
-        message="Human approval recorded for workflow manifest.",
-        attributes={"approval_id": approval.approval_id, "token_ref": request.token_ref},
-    )
-    await _emit_sidecar_event(
-        settings=settings,
-        event_type="workflow.approved",
-        user_id=approved.plan.user_id,
-        session_id=approved.plan.session_id,
-        tenant_id=approved.plan.tenant_id,
-        workflow_id=workflow_id,
-        plan_hash=record.plan_hash,
-        approval_id=approval.approval_id,
-        attributes={"token_ref": request.token_ref},
-    )
-
-    delegated = _append_event(
-        approved,
-        event_type="workflow.execution_delegated",
-        message=(
-            "Workflow approval was recorded; execution is delegated to the target "
-            "agent service and egress gateway runtime."
-        ),
-        attributes={"approval_id": approval.approval_id},
-    )
-    store[workflow_id] = delegated
-    return delegated
-
-
-@router.get("/workflows/{workflow_id}", response_model=WorkflowRecord)
-async def get_workflow(
-    workflow_id: str,
-    store: Annotated[WorkflowStore, Depends(get_workflow_store)],
-) -> WorkflowRecord:
-    return _require_workflow(store, workflow_id)
-
-
-def _require_workflow(store: WorkflowStore, workflow_id: str) -> WorkflowRecord:
-    record = store.get(workflow_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="workflow not found")
-    return record
-
-
-def _step_from_proposal(
-    index: int,
-    proposal: ToolProposal,
-    token_scopes: list[str],
-) -> WorkflowStep:
-    required_scopes = _required_scopes(proposal, token_scopes)
-    return WorkflowStep(
-        step_id=f"step-{index:03d}",
-        target_agent=proposal.agent_name,
-        action=proposal.tool_name,
-        input_model_type=f"{proposal.tool_name}.arguments",
-        input_payload_json=json.dumps(
-            proposal.arguments,
-            sort_keys=True,
-            separators=(",", ":"),
-        ),
-        required_scopes=required_scopes,
-    )
-
-
-def _filter_proposals_by_allowed_tools(
-    proposals: list[ToolProposal],
-    allowed_tools: list[str] | None,
-) -> list[ToolProposal]:
-    if allowed_tools is None:
-        return proposals
-    allowed_tool_names = set(allowed_tools).union(ORCHESTRATION_TOOL_NAMES)
-    return [proposal for proposal in proposals if proposal.tool_name in allowed_tool_names]
-
-
-def _required_scopes(proposal: ToolProposal, token_scopes: list[str]) -> list[str]:
-    requirements = (
-        scope_requirements_for_auth0_token(proposal.tool_name, token_scopes)
-        if token_scopes
-        else scope_requirements_for_tool(proposal.tool_name)
-    )
+def _trusted_context_from_request(
+    request: Request,
+    settings: SupervisorSettings,
+) -> TrustedSessionContext:
     try:
-        return materialize_scopes_for_proposal(proposal, requirements)
-    except ScopeMaterializationError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=f"could not materialize workflow scopes for {proposal.tool_name}: {exc}",
-        ) from exc
-
-
-def _append_event(
-    record: WorkflowRecord,
-    *,
-    event_type: str,
-    message: str,
-    attributes: dict[str, object],
-) -> WorkflowRecord:
-    events = list(record.events)
-    events.append(
-        WorkflowTimelineEvent(
-            event_type=event_type,
-            message=message,
-            attributes=attributes,
+        return verify_session_context(
+            encoded_context=request.headers.get(SESSION_CONTEXT_HEADER),
+            signature=request.headers.get(SESSION_CONTEXT_SIGNATURE_HEADER),
+            secret=settings.internal_service_auth_secret or "",
         )
-    )
-    return record.model_copy(update={"events": events, "updated_at": datetime.now(UTC)})
+    except InternalAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+def _assert_metadata_request_matches_trusted_context(
+    request: Auth0UserSessionMetadataRequest,
+    context: TrustedSessionContext,
+) -> None:
+    mismatches = [
+        key
+        for key, body_value, context_value in (
+            ("session_id", request.session_id, context.session_id),
+            ("tenant_id", request.tenant_id, context.tenant_id),
+            ("token_ref", request.token_ref, context.token_ref),
+            ("token_scopes", request.token_scopes, context.token_scopes),
+            ("user_id", request.user_id, context.user_id),
+        )
+        if body_value != context_value
+    ]
+    if mismatches:
+        raise HTTPException(
+            status_code=403,
+            detail="Auth0 metadata request does not match trusted session context: "
+            + ", ".join(mismatches),
+        )
 
 
 def _required_auth0_string(payload: dict[str, Any], key: str) -> str:
@@ -462,10 +210,16 @@ async def _load_auth0_user_metadata(
     user_payload = cast(dict[str, Any], user_response.json())
     app_metadata = user_payload.get("app_metadata")
     if not isinstance(app_metadata, dict):
-        return {}
+        raise HTTPException(
+            status_code=403,
+            detail="Auth0 user metadata is missing app_metadata.magnum_opus",
+        )
     magnum_opus = cast(dict[str, object], app_metadata).get("magnum_opus")
     if not isinstance(magnum_opus, dict):
-        return {}
+        raise HTTPException(
+            status_code=403,
+            detail="Auth0 user metadata is missing app_metadata.magnum_opus",
+        )
     return cast(dict[str, object], magnum_opus)
 
 
@@ -539,6 +293,16 @@ def _metadata_string_list(metadata: dict[str, object], key: str) -> list[str]:
         return []
     values = cast(list[object], value)
     return sorted({item.strip() for item in values if isinstance(item, str) and item.strip()})
+
+
+def _required_metadata_string_list(metadata: dict[str, object], key: str) -> list[str]:
+    values = _metadata_string_list(metadata, key)
+    if not values:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Auth0 user metadata field app_metadata.magnum_opus.{key} is required",
+        )
+    return values
 
 
 def _persona_traits_from_session(
@@ -619,32 +383,22 @@ async def _emit_sidecar_event(
                 source_component="supervisor",
                 level="info",
                 message=event_type,
-                attributes=attributes or {},
-                trace_id=event.trace_id,
+                attributes=event.attributes,
                 agentic_span_id=event.agentic_span_id,
             )
-    except httpx.HTTPError:
+    except (httpx.HTTPError, RuntimeError):
         return
 
 
 def _auth0_error_detail(response: httpx.Response) -> str:
     try:
-        payload = response.json()
+        payload = cast(object, response.json())
     except ValueError:
-        return "Auth0 token exchange failed"
-
-    if not isinstance(payload, dict):
-        return "Auth0 token exchange failed"
-
-    error_payload = cast(dict[str, object], payload)
-    error = error_payload.get("error")
-    description = error_payload.get("error_description")
-    details = [
-        item
-        for item in (error, description)
-        if isinstance(item, str) and item.strip()
-    ]
-    if not details:
-        return "Auth0 token exchange failed"
-
-    return "Auth0 token exchange failed: " + " - ".join(details)
+        return response.text
+    if isinstance(payload, dict):
+        typed_payload = cast(dict[str, object], payload)
+        for key in ("error_description", "message", "error"):
+            value = typed_payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return response.text

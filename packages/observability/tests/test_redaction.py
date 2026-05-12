@@ -41,7 +41,8 @@ def test_redaction_catches_token_like_fields_and_inline_tokens() -> None:
         "bearer_token": "raw-bearer-token",
         "message": (
             "called with access_token=raw-access-token and "
-            "Authorization: Bearer raw-header-token"
+            "Authorization: Bearer raw-header-token and "
+            "authorization smoke-secret-token"
         ),
     }
 
@@ -55,5 +56,7 @@ def test_redaction_catches_token_like_fields_and_inline_tokens() -> None:
     assert redacted["bearer_token"] == REDACTED
     assert "raw-access-token" not in redacted["message"]
     assert "raw-header-token" not in redacted["message"]
+    assert "smoke-secret-token" not in redacted["message"]
     assert "access_token=" + REDACTED in redacted["message"]
     assert "Bearer " + REDACTED in redacted["message"]
+    assert "authorization " + REDACTED in redacted["message"]

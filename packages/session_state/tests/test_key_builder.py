@@ -4,6 +4,7 @@ import pytest
 from session_state.key_builder import (
     build_session_events_key,
     build_session_key,
+    build_thread_key,
     build_workflow_events_key,
     build_workflow_key,
 )
@@ -45,6 +46,18 @@ def test_workflow_key_extends_session_key() -> None:
             workflow_id="workflow:001",
         )
         == "session_state:v1:tenant:tenant:user:user:session:session:workflow:workflow%3A001"
+    )
+
+
+def test_thread_key_extends_session_key() -> None:
+    assert (
+        build_thread_key(
+            tenant_id="tenant",
+            user_id="user",
+            session_id="session",
+            thread_id="thread:001",
+        )
+        == "session_state:v1:tenant:tenant:user:user:session:session:thread:thread%3A001"
     )
 
 

@@ -9,24 +9,36 @@ import {
   type Dispatch,
   type SetStateAction
 } from "react";
-import type { Auth0UserSession } from "@/lib/auth0-config";
+import type { Auth0BrowserSession } from "@/lib/auth0-config";
+
+type WorkflowState = Record<string, unknown>;
 
 type WorkflowContextValue = {
-  auth0Session: Auth0UserSession | null;
-  setAuth0Session: Dispatch<SetStateAction<Auth0UserSession | null>>;
+  activeWorkflow: WorkflowState | null;
+  auth0Session: Auth0BrowserSession | null;
+  setActiveWorkflow: Dispatch<SetStateAction<WorkflowState | null>>;
+  setAuth0Session: Dispatch<SetStateAction<Auth0BrowserSession | null>>;
+  setWorkflowCandidateId: Dispatch<SetStateAction<string | null>>;
+  workflowCandidateId: string | null;
 };
 
 const WorkflowContext = createContext<WorkflowContextValue | null>(null);
 
 export function WorkflowContextProvider({ children }: { children: ReactNode }) {
-  const [auth0Session, setAuth0Session] = useState<Auth0UserSession | null>(null);
+  const [auth0Session, setAuth0Session] = useState<Auth0BrowserSession | null>(null);
+  const [activeWorkflow, setActiveWorkflow] = useState<WorkflowState | null>(null);
+  const [workflowCandidateId, setWorkflowCandidateId] = useState<string | null>(null);
 
   const value = useMemo(
     () => ({
+      activeWorkflow,
       auth0Session,
-      setAuth0Session
+      setActiveWorkflow,
+      setAuth0Session,
+      setWorkflowCandidateId,
+      workflowCandidateId
     }),
-    [auth0Session]
+    [activeWorkflow, auth0Session, workflowCandidateId]
   );
 
   return <WorkflowContext.Provider value={value}>{children}</WorkflowContext.Provider>;

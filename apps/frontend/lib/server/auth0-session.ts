@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { Auth0UserSession } from "@/lib/auth0-config";
+import { loadAuth0Session, storeAuth0Session } from "@/lib/server/auth0-session-store";
 
 export const AUTH0_SESSION_COOKIE = "magnum_opus_auth0_session";
 export const AUTH0_TRANSACTION_COOKIE = "magnum_opus_auth0_transaction";
@@ -7,6 +8,10 @@ export const AUTH0_TRANSACTION_COOKIE = "magnum_opus_auth0_transaction";
 type SignedCookieEnvelope<T> = {
   value: T;
   exp: number;
+};
+
+type Auth0SessionCookieValue = {
+  sessionId: string;
 };
 
 export type CookieOptions = {
@@ -28,6 +33,17 @@ export function createSignedCookieValue<T>(value: T, maxAgeSeconds: number): str
   };
   const payload = base64UrlEncode(JSON.stringify(envelope));
   return `${payload}.${sign(payload)}`;
+}
+
+export function createAuth0SessionCookieValue(
+  session: Auth0UserSession,
+  maxAgeSeconds: number
+): string {
+  storeAuth0Session(session);
+  return createSignedCookieValue<Auth0SessionCookieValue>(
+    { sessionId: session.sessionId },
+    maxAgeSeconds
+  );
 }
 
 export function readSignedCookieValue<T>(cookieValue: string | null): T | null {
@@ -52,10 +68,14 @@ export function readSignedCookieValue<T>(cookieValue: string | null): T | null {
 }
 
 export function readAuth0SessionCookie(cookieHeader: string | null): Auth0UserSession | null {
+  return readAuth0SessionCookieValue(getCookieValue(cookieHeader, AUTH0_SESSION_COOKIE));
+}
+
+export function readAuth0SessionCookieValue(cookieValue: string | null): Auth0UserSession | null {
   try {
-    return readSignedCookieValue<Auth0UserSession>(
-      getCookieValue(cookieHeader, AUTH0_SESSION_COOKIE)
-    );
+    const handle = readSignedCookieValue<Auth0SessionCookieValue>(cookieValue);
+    if (!handle || !isSessionCookieValue(handle)) return null;
+    return loadAuth0Session(handle.sessionId);
   } catch {
     return null;
   }
@@ -100,6 +120,14 @@ function sessionSecret(): string {
     throw new Error("AUTH0_SESSION_SECRET must be at least 32 characters");
   }
   return secret;
+}
+
+function isSessionCookieValue(value: unknown): value is Auth0SessionCookieValue {
+  return (
+    Boolean(value && typeof value === "object" && !Array.isArray(value)) &&
+    Object.keys(value as Record<string, unknown>).length === 1 &&
+    typeof (value as { sessionId?: unknown }).sessionId === "string"
+  );
 }
 
 function base64UrlEncode(value: string): string {

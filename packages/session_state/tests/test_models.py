@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 from session_state.models import (
+    AgUiThreadState,
     SessionState,
     WorkflowPlan,
     WorkflowState,
@@ -19,14 +20,12 @@ def test_session_state_requires_strict_fields() -> None:
         SessionState(
             user_id=123,
             session_id="session-1",
-            auth_context_ref="auth-ref",
         )
 
     with pytest.raises(ValidationError):
         SessionState(
             user_id="user-1",
             session_id="session-1",
-            auth_context_ref="auth-ref",
             version=-1,
         )
 
@@ -36,7 +35,6 @@ def test_session_state_forbids_extra_fields() -> None:
         SessionState(
             user_id="user-1",
             session_id="session-1",
-            auth_context_ref="auth-ref",
             unexpected="value",
         )
 
@@ -46,11 +44,58 @@ def test_session_state_round_trips_as_pydantic_json_blob() -> None:
         tenant_id="tenant-1",
         user_id="user-1",
         session_id="session-1",
+        token_ref="token-ref",
         auth_context_ref="auth-ref",
         values={"selected_app": "ABCD"},
     )
 
-    assert SessionState.model_validate_json(state.model_dump_json()) == state
+    restored = SessionState.model_validate_json(state.model_dump_json())
+
+    assert restored.model_dump() == state.model_dump()
+    assert restored.auth_context_ref is None
+    assert "auth_context_ref" not in state.model_dump()
+
+
+def test_session_state_keeps_auth_context_ref_server_side_only() -> None:
+    state = SessionState(
+        user_id="user-1",
+        session_id="session-1",
+        token_ref="token-ref",
+        auth_context_ref="raw-auth-ref",
+    )
+
+    assert state.auth_context_ref == "raw-auth-ref"
+    assert state.model_dump() == {
+        "tenant_id": None,
+        "user_id": "user-1",
+        "session_id": "session-1",
+        "token_ref": "token-ref",
+        "active_workflow_id": None,
+        "version": 0,
+        "values": {},
+        "created_at": state.created_at,
+        "updated_at": state.updated_at,
+    }
+
+
+def test_ag_ui_thread_state_round_trips_without_raw_auth_context() -> None:
+    state = AgUiThreadState(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        session_id="session-1",
+        thread_id="thread-1",
+        messages=[{"role": "user", "content": "Check DNS"}],
+        state={"token_ref": "token-ref", "workflow": {"workflow_id": "wf-1"}},
+        token_ref="token-ref",
+        auth_context_ref="raw-auth-ref",
+        active_workflow_id="wf-1",
+    )
+
+    restored = AgUiThreadState.model_validate_json(state.model_dump_json())
+
+    assert restored.model_dump() == state.model_dump()
+    assert restored.auth_context_ref is None
+    assert "auth_context_ref" not in state.model_dump()
 
 
 def test_workflow_state_requires_status() -> None:

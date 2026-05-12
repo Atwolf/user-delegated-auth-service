@@ -34,7 +34,12 @@ class LogIngest(BaseModel):
         return value
 
     def redacted(self) -> LogIngest:
-        return self.model_copy(update={"attributes": redact_sensitive(self.attributes)})
+        return self.model_copy(
+            update={
+                "attributes": redact_sensitive(self.attributes),
+                "message": redact_sensitive(self.message),
+            }
+        )
 
 
 class SidecarStats(BaseModel):

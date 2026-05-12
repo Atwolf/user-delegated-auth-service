@@ -11,7 +11,12 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@": new URL(".", import.meta.url).pathname
+      "@": new URL(".", import.meta.url).pathname,
+      "@ag-ui/client": new URL("./tests/stubs/ag-ui-client.ts", import.meta.url).pathname,
+      "@assistant-ui/react-ag-ui": new URL(
+        "./tests/stubs/react-ag-ui.ts",
+        import.meta.url
+      ).pathname
     }
   }
 });

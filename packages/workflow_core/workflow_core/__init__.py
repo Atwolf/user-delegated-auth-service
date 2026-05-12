@@ -10,11 +10,17 @@ from workflow_core.authz import (
     restricted,
     scope_requirements_from_callable,
 )
+from workflow_core.grants import (
+    ExecutionGrantError,
+    sign_execution_grant,
+    verify_execution_grant,
+)
 from workflow_core.hashing import canonical_json, plan_hash
 from workflow_core.models import (
     ApprovedWorkflow,
     AuthorizationBundle,
     EgressRequest,
+    ExecutionGrant,
     ScopeRequirement,
     ToolIntent,
     ToolProposal,
@@ -25,7 +31,6 @@ from workflow_core.models import (
 )
 from workflow_core.policy import evaluate_workflow_policy
 from workflow_core.tool_catalog import (
-    INSPECT_REQUEST_AUTHORIZATION,
     TOOL_AUTHORIZATION_CATALOG,
     ToolAuthorizationSpec,
     get_tool_authorization,
@@ -38,7 +43,8 @@ __all__ = [
     "ApprovedWorkflow",
     "AuthorizationBundle",
     "EgressRequest",
-    "INSPECT_REQUEST_AUTHORIZATION",
+    "ExecutionGrant",
+    "ExecutionGrantError",
     "ScopeMaterializationError",
     "ScopeRequirement",
     "TOOL_AUTHORIZATION_CATALOG",
@@ -62,5 +68,7 @@ __all__ = [
     "scope_requirements_for_auth0_token",
     "scope_requirements_for_tool",
     "select_auth0_scopes_for_tool",
+    "sign_execution_grant",
     "scope_requirements_from_callable",
+    "verify_execution_grant",
 ]

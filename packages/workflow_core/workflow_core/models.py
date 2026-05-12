@@ -125,17 +125,26 @@ class WorkflowPolicyDecision(BaseModel):
         return _dedupe_sorted(scopes)
 
 
-class EgressRequest(BaseModel):
-    model_config = STRICT_MODEL_CONFIG
+class ExecutionGrant(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
+    workflow_id: str = Field(..., min_length=1)
+    approval_id: str = Field(..., min_length=1)
+    plan_hash: str = Field(..., min_length=1)
+    step_id: str = Field(..., min_length=1)
     primitive: Literal["DISCOVERY", "READ", "EXECUTE", "MUTATION"]
     method: Literal["GET", "POST"]
     target_mcp: str = Field(..., min_length=1)
     tool_name: str = Field(..., min_length=1)
     arguments: dict[str, object] = Field(default_factory=dict)
-    workflow_id: str = Field(..., min_length=1)
-    approval_id: str | None = Field(default=None, min_length=1)
-    obo_token_ref: str | None = Field(default=None, min_length=1)
+    required_scopes: list[str] = Field(default_factory=list)
+    audience: str | None = Field(default=None, min_length=1)
+    user_id: str = Field(..., min_length=1)
+    session_id: str = Field(..., min_length=1)
+    tenant_id: str | None = Field(default=None, min_length=1)
+    approved_by_user_id: str = Field(..., min_length=1)
+    expires_at: datetime | None = None
+    correlation_id: str = Field(..., min_length=1)
 
     @field_validator("arguments")
     @classmethod
@@ -150,6 +159,47 @@ class EgressRequest(BaseModel):
     @classmethod
     def _normalize_uppercase(cls, value: object) -> object:
         return value.upper() if isinstance(value, str) else value
+
+    @field_validator("required_scopes")
+    @classmethod
+    def _normalize_required_scopes(cls, scopes: list[str]) -> list[str]:
+        return _dedupe_sorted(scopes)
+
+
+class EgressRequest(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+
+    primitive: Literal["DISCOVERY", "READ", "EXECUTE", "MUTATION"]
+    method: Literal["GET", "POST"]
+    target_mcp: str = Field(..., min_length=1)
+    tool_name: str = Field(..., min_length=1)
+    arguments: dict[str, object] = Field(default_factory=dict)
+    workflow_id: str = Field(..., min_length=1)
+    approval_id: str | None = Field(default=None, min_length=1)
+    obo_token_ref: str | None = Field(default=None, min_length=1)
+    execution_grant: ExecutionGrant | None = None
+    execution_grant_signature: str | None = Field(default=None, min_length=1)
+    token_scopes: list[str] = Field(default_factory=list)
+    token_audience: str | None = Field(default=None, min_length=1)
+
+    @field_validator("arguments")
+    @classmethod
+    def _validate_argument_names(
+        cls,
+        arguments: dict[str, object],
+    ) -> dict[str, object]:
+        _require_non_empty_strings(list(arguments))
+        return arguments
+
+    @field_validator("primitive", "method", mode="before")
+    @classmethod
+    def _normalize_uppercase(cls, value: object) -> object:
+        return value.upper() if isinstance(value, str) else value
+
+    @field_validator("token_scopes")
+    @classmethod
+    def _normalize_token_scopes(cls, scopes: list[str]) -> list[str]:
+        return _dedupe_sorted(scopes)
 
 
 class WorkflowPlan(BaseModel):

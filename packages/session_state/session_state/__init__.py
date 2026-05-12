@@ -1,13 +1,24 @@
 from .interfaces import SessionIdentity, SessionStateStore, WorkflowEventLike
+from .internal_auth import (
+    SESSION_CONTEXT_HEADER,
+    SESSION_CONTEXT_SIGNATURE_HEADER,
+    InternalAuthError,
+    TrustedSessionContext,
+    signed_session_context_headers,
+    trusted_context_payload,
+    verify_session_context,
+)
 from .key_builder import (
     DEFAULT_KEY_PREFIX,
     GLOBAL_TENANT_ID,
     build_session_events_key,
     build_session_key,
+    build_thread_key,
     build_workflow_events_key,
     build_workflow_key,
 )
 from .models import (
+    AgUiThreadState,
     ApprovedWorkflow,
     SessionState,
     WorkflowPlan,
@@ -25,15 +36,20 @@ from .redis_store import (
 
 __all__ = [
     "ApprovedWorkflow",
+    "AgUiThreadState",
     "DEFAULT_KEY_PREFIX",
     "GLOBAL_TENANT_ID",
+    "InternalAuthError",
     "RedisSessionStateStore",
+    "SESSION_CONTEXT_HEADER",
+    "SESSION_CONTEXT_SIGNATURE_HEADER",
     "SessionIdentity",
     "SessionState",
     "SessionStateNotFoundError",
     "SessionStateStore",
     "SessionStateStoreError",
     "SessionStateVersionConflictError",
+    "TrustedSessionContext",
     "WorkflowEventLike",
     "WorkflowPlan",
     "WorkflowState",
@@ -42,6 +58,10 @@ __all__ = [
     "WorkflowStep",
     "build_session_events_key",
     "build_session_key",
+    "build_thread_key",
     "build_workflow_events_key",
     "build_workflow_key",
+    "signed_session_context_headers",
+    "trusted_context_payload",
+    "verify_session_context",
 ]

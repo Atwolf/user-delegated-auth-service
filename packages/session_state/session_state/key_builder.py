@@ -60,6 +60,25 @@ def build_workflow_key(
     return f"{session_key}:workflow:{_encode_part(workflow_id, field_name='workflow_id')}"
 
 
+def build_thread_key(
+    *,
+    user_id: str,
+    session_id: str,
+    thread_id: str,
+    tenant_id: str | None = None,
+    prefix: str = DEFAULT_KEY_PREFIX,
+) -> str:
+    """Return the deterministic Redis key for an AG-UI thread state blob."""
+
+    session_key = build_session_key(
+        user_id=user_id,
+        session_id=session_id,
+        tenant_id=tenant_id,
+        prefix=prefix,
+    )
+    return f"{session_key}:thread:{_encode_part(thread_id, field_name='thread_id')}"
+
+
 def build_session_events_key(
     *,
     user_id: str,

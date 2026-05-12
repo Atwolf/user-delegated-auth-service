@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
-import { AssistantRoot } from "@/components/assistant-root";
 
 export const metadata: Metadata = {
   title: "Magnum Opus Auth0 Workflow Sample",
@@ -13,9 +12,7 @@ export default function RootLayout({
 }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en">
-      <body>
-        <AssistantRoot>{children}</AssistantRoot>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

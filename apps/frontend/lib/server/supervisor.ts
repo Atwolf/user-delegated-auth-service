@@ -1,15 +1,45 @@
-import { parseScopeString, type Auth0UserSession } from "@/lib/auth0-config";
-import type { WorkflowRecord } from "@/lib/workflow-types";
+import {
+  parseScopeString,
+  type Auth0ServerSession,
+  type Auth0UserSession
+} from "@/lib/auth0-config";
+import { signedSessionContextHeaders } from "@/lib/server/internal-auth";
+import { sanitizeBrowserRecord, sanitizeBrowserValue } from "@/lib/server/redaction";
 
 type UserSessionMetadataInput = {
   audience: string | null;
   expiresAt: number | null;
   sessionId: string;
+  tenantId?: string | null;
   tokenRef: string;
   tokenScopes: string[];
   userEmail: string | null;
   userId: string;
   userName: string | null;
+};
+
+export type SanitizedSessionContext = {
+  allowed_tools: string[];
+  session_id: string;
+  token_ref: string;
+  token_scopes: string[];
+  tenant_id?: string;
+  user_id: string;
+};
+
+export type AgentThreadSnapshot = {
+  messages: unknown[];
+  state: Record<string, unknown>;
+  threadId: string;
+  title: string | null;
+};
+
+export type WorkflowApprovalSnapshot = {
+  workflow: Record<string, unknown>;
+};
+
+export type WorkflowSnapshot = {
+  workflow: Record<string, unknown>;
 };
 
 const supervisorBaseUrl = () =>
@@ -21,11 +51,16 @@ const agentServiceBaseUrl = () =>
 async function postSupervisor<TResponse>(
   path: string,
   body: Record<string, unknown>,
-  failureMessage: string
+  failureMessage: string,
+  sessionContext?: SanitizedSessionContext
 ): Promise<TResponse> {
+  const correlationId = crypto.randomUUID();
   const response = await fetch(`${supervisorBaseUrl()}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...(sessionContext ? signedSessionContextHeaders(sessionContext, correlationId) : {})
+    },
     body: JSON.stringify(body),
     cache: "no-store"
   });
@@ -43,13 +78,44 @@ async function postSupervisor<TResponse>(
 async function postAgentService<TResponse>(
   path: string,
   body: Record<string, unknown>,
-  failureMessage: string
+  failureMessage: string,
+  sessionContext?: SanitizedSessionContext
 ): Promise<TResponse> {
+  const correlationId = crypto.randomUUID();
   const response = await fetch(`${agentServiceBaseUrl()}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...(sessionContext ? signedSessionContextHeaders(sessionContext, correlationId) : {})
+    },
     body: JSON.stringify(body),
     cache: "no-store"
+  });
+
+  if (!response.ok) {
+    const detail = await responseErrorDetail(response);
+    throw new Error(
+      `${failureMessage} with HTTP ${response.status}${detail ? `: ${detail}` : ""}`
+    );
+  }
+
+  return (await response.json()) as TResponse;
+}
+
+async function getAgentService<TResponse>(
+  path: string,
+  query: Record<string, string | null | undefined>,
+  failureMessage: string,
+  sessionContext?: SanitizedSessionContext
+): Promise<TResponse> {
+  const url = new URL(`${agentServiceBaseUrl()}${path}`);
+  for (const [key, value] of Object.entries(query)) {
+    if (value) url.searchParams.set(key, value);
+  }
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    cache: "no-store",
+    headers: sessionContext ? signedSessionContextHeaders(sessionContext, crypto.randomUUID()) : {}
   });
 
   if (!response.ok) {
@@ -65,6 +131,14 @@ async function postAgentService<TResponse>(
 export async function loadAuth0UserSession(
   input: UserSessionMetadataInput
 ): Promise<Auth0UserSession> {
+  const sessionContext: SanitizedSessionContext = {
+    allowed_tools: [],
+    session_id: input.sessionId,
+    token_ref: input.tokenRef,
+    token_scopes: input.tokenScopes,
+    user_id: input.userId
+  };
+  if (input.tenantId) sessionContext.tenant_id = input.tenantId;
   const result = await postSupervisor<{
     scope: string;
     audience: string | null;
@@ -85,17 +159,20 @@ export async function loadAuth0UserSession(
       session_id: input.sessionId,
       token_ref: input.tokenRef,
       token_scopes: input.tokenScopes,
+      tenant_id: input.tenantId ?? null,
       user_email: input.userEmail,
       user_id: input.userId,
       user_name: input.userName
     },
-    "Auth0 session metadata loading failed"
+    "Auth0 session metadata loading failed",
+    sessionContext
   );
 
   return {
     audience: result.audience,
     expiresAt: input.expiresAt,
     sessionId: input.sessionId,
+    tenantId: input.tenantId ?? null,
     tokenRef: result.token_ref,
     scope: result.scope,
     userId: result.user_id,
@@ -110,126 +187,151 @@ export async function loadAuth0UserSession(
   };
 }
 
-export async function planWorkflow(
-  question: string,
-  session: Auth0UserSession
-): Promise<WorkflowRecord> {
-  const response = await postAgentService<AgentWorkflowResponse | WorkflowRecord>(
-    "/workflows/plan",
+export function sanitizedSessionContext(session: Auth0UserSession): SanitizedSessionContext {
+  const context: SanitizedSessionContext = {
+    allowed_tools: [...new Set(session.allowedTools)].sort(),
+    session_id: session.sessionId,
+    token_ref: session.tokenRef,
+    token_scopes: parseScopeString(session.scope),
+    user_id: session.userId
+  };
+  if (session.tenantId) context.tenant_id = session.tenantId;
+  return context;
+}
+
+export async function createAgentThread(
+  session: Auth0UserSession,
+  input: { title?: string | null } = {}
+): Promise<AgentThreadSnapshot> {
+  const context = sanitizedSessionContext(session);
+  const response = await postAgentService<AgentThreadResponse>(
+    "/threads",
     {
-      question,
+      allowed_tools: context.allowed_tools,
+      session_id: context.session_id,
+      state: {},
+      title: input.title ?? null,
+      token_ref: context.token_ref,
+      token_scopes: context.token_scopes,
+      user_id: context.user_id
+    },
+    "Thread creation failed",
+    context
+  );
+  return normalizeAgentThread(response);
+}
+
+export async function registerAgentAuthContext(session: Auth0ServerSession): Promise<void> {
+  const context = sanitizedSessionContext(session);
+  await postAgentService<{ token_ref: string }>(
+    "/token-context",
+    {
       auth_context_ref: session.authContextRef,
-      user_id: session.userId,
-      session_id: session.sessionId,
-      token_ref: session.tokenRef,
-      token_scopes: parseScopeString(session.scope),
-      allowed_tools: [...new Set(session.allowedTools)].sort()
+      token_ref: context.token_ref
     },
-    "Workflow planning failed"
+    "Auth token registration failed",
+    context
   );
-  return normalizeWorkflowResponse(response);
 }
 
-export async function approveWorkflow(
-  workflowId: string,
-  planHash: string,
+export async function restoreAgentThread(
+  threadId: string,
   session: Auth0UserSession
-): Promise<WorkflowRecord> {
-  const response = await postAgentService<AgentWorkflowResponse | WorkflowRecord>(
-    `/workflows/${workflowId}/approve`,
-    {
-      approved: true,
-      approved_by_user_id: session.userId,
-      plan_hash: planHash
-    },
-    "Workflow approval failed"
+): Promise<AgentThreadSnapshot> {
+  const context = sanitizedSessionContext(session);
+  const response = await getAgentService<AgentThreadResponse>(
+    `/threads/${encodeURIComponent(threadId)}`,
+    {},
+    "Thread restore failed",
+    context
   );
-  return normalizeWorkflowResponse(response);
+  return normalizeAgentThread(response, threadId);
 }
 
-type AgentWorkflowRecord = {
-  workflow_id: string;
-  status: WorkflowRecord["status"]["status"];
-  proposal: WorkflowRecord["plan"];
-  plan_hash: string;
-  tool_intents: Array<{
-    agent_name: string;
-    tool_name: string;
-    arguments: Record<string, unknown>;
-    reason?: string | null;
-  }>;
-  policy: {
-    required_scopes: string[];
-  };
-  egress_results?: Array<Record<string, unknown>>;
-  created_at: string;
-};
+export async function restoreAgentWorkflow(
+  workflowId: string,
+  session: Auth0UserSession
+): Promise<WorkflowSnapshot> {
+  const context = sanitizedSessionContext(session);
+  const response = await getAgentService<WorkflowResponse>(
+    `/workflows/${encodeURIComponent(workflowId)}`,
+    {},
+    "Workflow restore failed",
+    context
+  );
+  return { workflow: normalizeWorkflow(response) };
+}
 
-type AgentWorkflowResponse = {
-  workflow?: AgentWorkflowRecord;
-  token_exchange?: WorkflowRecord["token_exchange"];
-};
-
-function toWorkflowRecord(
-  workflow: AgentWorkflowRecord,
-  tokenExchange?: WorkflowRecord["token_exchange"]
-): WorkflowRecord {
-  return {
-    workflow_id: workflow.workflow_id,
-    status: { status: workflow.status },
-    plan_hash: workflow.plan_hash,
-    token_exchange: tokenExchange,
-    authorization: {
-      workflow_id: workflow.workflow_id,
-      scopes: workflow.policy.required_scopes,
-      proposals: workflow.tool_intents.map((intent) => ({
-        agent_name: intent.agent_name,
-        tool_name: intent.tool_name,
-        arguments: intent.arguments,
-        reason: intent.reason ?? null
-      }))
+export async function approveAgentWorkflow(
+  workflowId: string,
+  session: Auth0UserSession,
+  input: { approved: boolean; planHash: string }
+): Promise<WorkflowApprovalSnapshot> {
+  const context = sanitizedSessionContext(session);
+  const response = await postAgentService<WorkflowApprovalResponse>(
+    `/workflows/${encodeURIComponent(workflowId)}/approve`,
+    {
+      approved: input.approved,
+      plan_hash: input.planHash
     },
-    plan: workflow.proposal,
-    events: [
-      {
-        event_type: "agent_service.workflow_planned",
-        message: "Agent Service returned a deterministic workflow manifest.",
-        attributes: {},
-        created_at: workflow.created_at
-      },
-      ...(tokenExchange?.attempted
-        ? [
-            {
-              event_type: "agent_service.obo_token_exchange",
-              message:
-                "Agent Service attempted an approval-bound Auth0 OBO token exchange.",
-              attributes: {
-                audience: tokenExchange.audience ?? null,
-                expires_at: tokenExchange.expires_at ?? null,
-                scopes: tokenExchange.scopes
-              },
-              created_at: new Date().toISOString()
-            }
-          ]
-        : [])
-    ],
-    step_results: (workflow.egress_results ?? []).map((result, index) => ({
-      step_id: `step-${index + 1}`,
-      target_agent: String(result.target_mcp ?? "egress_gateway"),
-      action: String(result.tool_name ?? "egress"),
-      status: "completed",
-      output: result
-    }))
+    "Workflow approval failed",
+    context
+  );
+  return normalizeWorkflowApproval(response);
+}
+
+type AgentThreadResponse = {
+  thread?: AgentThreadResponse;
+  messages?: unknown;
+  state?: unknown;
+  thread_id?: unknown;
+  threadId?: unknown;
+  title?: unknown;
+};
+
+type WorkflowApprovalResponse = {
+  workflow?: unknown;
+};
+
+type WorkflowResponse = {
+  workflow?: unknown;
+};
+
+function normalizeAgentThread(
+  response: AgentThreadResponse,
+  fallbackThreadId?: string
+): AgentThreadSnapshot {
+  const payload = response.thread ?? response;
+  const threadId =
+    typeof payload.threadId === "string"
+      ? payload.threadId
+      : typeof payload.thread_id === "string"
+        ? payload.thread_id
+        : fallbackThreadId;
+
+  if (!threadId) {
+    throw new Error("Agent Service returned a thread response without a thread id");
+  }
+
+  return {
+    messages: sanitizeThreadMessages(payload.messages),
+    state: isRecord(payload.state) ? sanitizeBrowserRecord(payload.state) : {},
+    threadId,
+    title: typeof payload.title === "string" ? payload.title : null
   };
 }
 
-function normalizeWorkflowResponse(
-  response: AgentWorkflowResponse | WorkflowRecord
-): WorkflowRecord {
-  if ("workflow" in response && response.workflow) {
-    return toWorkflowRecord(response.workflow, response.token_exchange);
+function normalizeWorkflowApproval(response: WorkflowApprovalResponse): WorkflowApprovalSnapshot {
+  return {
+    workflow: normalizeWorkflow(response)
+  };
+}
+
+function normalizeWorkflow(response: WorkflowResponse): Record<string, unknown> {
+  if (!isRecord(response.workflow)) {
+    throw new Error("Agent Service returned a response without a workflow");
   }
-  return response as WorkflowRecord;
+  return sanitizeBrowserRecord(response.workflow);
 }
 
 async function responseErrorDetail(response: Response): Promise<string> {
@@ -243,4 +345,21 @@ async function responseErrorDetail(response: Response): Promise<string> {
     return "";
   }
   return "";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+const RESTORABLE_MESSAGE_ROLES = new Set(["assistant", "system", "user"]);
+
+function sanitizeThreadMessages(value: unknown): unknown[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((message) => sanitizeBrowserValue(message))
+    .filter((message) => {
+      if (!isRecord(message)) return false;
+      const role = message.role;
+      return typeof role === "string" && RESTORABLE_MESSAGE_ROLES.has(role);
+    }) as unknown[];
 }

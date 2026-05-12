@@ -3,7 +3,5 @@ kind: ConfigMap
 metadata:
   name: agent-service-config
 data:
-  SUBAGENT_DB_PATH: /data/supervisor/subagents.sqlite
   REDIS_URL: redis://redis:6379/0
-  TEMPORAL_ADDRESS: temporal:7233
   OBSERVABILITY_SIDECAR_URL: http://127.0.0.1:4319
