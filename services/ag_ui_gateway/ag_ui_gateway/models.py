@@ -13,7 +13,7 @@ class AgUiMessage(BaseModel):
 
 
 class RunAgentInput(BaseModel):
-    model_config = ConfigDict(extra="allow", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     thread_id: str = Field(..., validation_alias=AliasChoices("threadId", "thread_id"))
     run_id: str = Field(..., validation_alias=AliasChoices("runId", "run_id"))
@@ -42,9 +42,16 @@ class AgentCapabilities(BaseModel):
     event_types: list[str] = Field(
         default_factory=lambda: [
             "RUN_STARTED",
+            "TEXT_MESSAGE_START",
             "TEXT_MESSAGE_CONTENT",
+            "TEXT_MESSAGE_END",
             "STATE_DELTA",
+            "TOOL_CALL_START",
+            "TOOL_CALL_ARGS",
+            "TOOL_CALL_END",
+            "TOOL_CALL_RESULT",
             "CUSTOM",
             "RUN_FINISHED",
+            "RUN_ERROR",
         ]
     )

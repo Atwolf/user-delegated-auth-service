@@ -29,12 +29,21 @@ def test_sidecar_ingests_traces_and_logs_with_redaction() -> None:
         json={
             "source_component": "developer-mcp",
             "level": "info",
-            "message": "tool called with Bearer abc123",
+            "message": "tool called with Bearer abc123 and authorization smoke-secret-token",
             "attributes": {"authorization": "Bearer abc123", "appid": "ABCD"},
         },
     )
     assert log_response.status_code == 200
     assert log_response.json()["attributes"]["authorization"] == "[REDACTED]"
+    assert log_response.json()["message"] == (
+        "tool called with Bearer [REDACTED] and authorization [REDACTED]"
+    )
+
+    telemetry = client.get("/v1/telemetry")
+    serialized = telemetry.text
+    assert "Bearer abc123" not in serialized
+    assert "smoke-secret-token" not in serialized
+    assert "secret-token" not in serialized
 
     stats = client.get("/v1/stats")
     assert stats.json() == {"trace_count": 1, "log_count": 1}

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import TracebackType
 from typing import Any
 
@@ -9,12 +8,13 @@ import httpx
 from agent_service_supervisor import routes
 from agent_service_supervisor.app import create_app
 from agent_service_supervisor.config import SupervisorSettings
-from agent_service_supervisor.discovery_sqlite import SubagentRecord
-from agent_service_supervisor.workflow_orchestrator import WorkflowOrchestrator
 from fastapi.testclient import TestClient
+from observability_sidecar.models import AgenticTraceIngest, LogIngest
+from observability_sidecar.store import InMemoryTelemetryStore
+from session_state import TrustedSessionContext, signed_session_context_headers
 
 
-def test_auth0_session_route_materializes_management_metadata(monkeypatch, tmp_path) -> None:
+def test_auth0_session_route_materializes_management_metadata(monkeypatch) -> None:
     emitted_events: list[dict[str, Any]] = []
 
     class FakeAsyncClient:
@@ -84,17 +84,23 @@ def test_auth0_session_route_materializes_management_metadata(monkeypatch, tmp_p
     monkeypatch.setattr(routes, "_emit_sidecar_event", capture_event)
     app = create_app(
         SupervisorSettings(
-            subagent_db_path=tmp_path / "subagents.sqlite",
             auth0_domain="samples.auth0.com",
             auth0_audience="https://api.example.test",
             auth0_management_client_id="management-client-id",
             auth0_management_client_secret="management-secret",
+            internal_service_auth_secret="test-internal-secret",
         )
     )
 
     with TestClient(app) as client:
         response = client.post(
             "/identity/auth0/session",
+            headers=_signed_context_headers(
+                user_id="auth0|user-1",
+                session_id="auth0-session-1",
+                token_ref="auth0:sample",
+                token_scopes=["openid", "profile"],
+            ),
             json={
                 "user_id": "auth0|user-1",
                 "user_email": "sample@example.com",
@@ -119,312 +125,255 @@ def test_auth0_session_route_materializes_management_metadata(monkeypatch, tmp_p
     assert "management-secret" not in str(payload)
 
 
-def test_plan_approve_execute_workflow_in_manifest_order(tmp_path) -> None:
-    async def handler(request: httpx.Request) -> httpx.Response:
-        host = request.url.host or ""
-        payloads: dict[str, dict[str, Any]] = {
-            "planner-agent": {
-                "proposals": [
-                    {
-                        "agent_name": "planner",
-                        "tool_name": "propose_workflow_plan",
-                        "arguments": {"query": "Check user sample-user and app sample-app"},
-                        "reason": "planner",
-                    }
-                ]
-            },
-            "identity-agent": {
-                "proposals": [
-                    {
-                        "agent_name": "identity",
-                        "tool_name": "get_identity_profile",
-                        "arguments": {"subject_user_id": "sample-user"},
-                        "reason": "identity",
-                    }
-                ]
-            },
-            "developer-agent": {
-                "proposals": [
-                    {
-                        "agent_name": "developer",
-                        "tool_name": "get_developer_app",
-                        "arguments": {"appid": "sample-app"},
-                        "reason": "developer",
-                    }
-                ]
-            },
-        }
-        return httpx.Response(200, json=payloads[host])
-
-    app = create_app(SupervisorSettings(subagent_db_path=tmp_path / "subagents.sqlite"))
-    _seed_legacy_subagents(app)
-    app.state.workflow_orchestrator = WorkflowOrchestrator(
-        app.state.subagent_discovery,
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
-    )
+def test_auth0_session_route_requires_signed_internal_context() -> None:
+    app = create_app(SupervisorSettings(internal_service_auth_secret="test-internal-secret"))
 
     with TestClient(app) as client:
-        planned = client.post(
-            "/workflows/plan",
+        response = client.post(
+            "/identity/auth0/session",
             json={
-                "question": "Check user sample-user and app sample-app",
-                "user_id": "sample-user",
-                "session_id": "session-1",
-                "token_ref": "auth0:sample",
-                "token_scopes": ["read:workflow", "read:users", "read:apps"],
-                "allowed_tools": ["get_identity_profile", "get_developer_app"],
-            },
-        )
-        assert planned.status_code == 200
-        manifest = planned.json()
-
-        assert manifest["status"]["status"] == "awaiting_approval"
-        assert [step["action"] for step in manifest["plan"]["steps"]] == [
-            "propose_workflow_plan",
-            "get_identity_profile",
-            "get_developer_app",
-        ]
-        scopes_by_action = {
-            step["action"]: step["required_scopes"] for step in manifest["plan"]["steps"]
-        }
-        assert scopes_by_action["get_identity_profile"] == ["read:user:sample-user"]
-        assert scopes_by_action["get_developer_app"] == ["read:client:sample-app"]
-        assert manifest["authorization"]["scopes"] == [
-            "read:client:sample-app",
-            "read:user:sample-user",
-            "read:workflow",
-        ]
-        assert manifest["events"][0]["attributes"]["filtered_proposal_count"] == 0
-
-        approved = client.post(
-            f"/workflows/{manifest['workflow_id']}/approve",
-            json={
-                "approved": True,
-                "approved_by_user_id": "sample-user",
-                "plan_hash": manifest["plan_hash"],
+                "user_id": "auth0|user-1",
+                "session_id": "auth0-session-1",
                 "token_ref": "auth0:sample",
             },
         )
-        assert approved.status_code == 200
-        result = approved.json()
 
-    assert result["status"]["status"] == "approved"
-    assert result["step_results"] == []
-    assert [event["event_type"] for event in result["events"]] == [
-        "workflow.planned",
-        "workflow.awaiting_approval",
-        "workflow.approved",
-        "workflow.execution_delegated",
-    ]
+    assert response.status_code == 401
+    assert response.json() == {"detail": "signed session context is required"}
 
 
-def test_plan_workflow_filters_proposals_to_allowed_tools(tmp_path) -> None:
-    async def handler(request: httpx.Request) -> httpx.Response:
-        host = request.url.host or ""
-        payloads: dict[str, dict[str, Any]] = {
-            "planner-agent": {
-                "proposals": [
-                    {
-                        "agent_name": "planner",
-                        "tool_name": "propose_workflow_plan",
-                        "arguments": {"query": "Check user sample-user and app sample-app"},
-                    }
-                ]
-            },
-            "identity-agent": {
-                "proposals": [
-                    {
-                        "agent_name": "identity",
-                        "tool_name": "get_identity_profile",
-                        "arguments": {"subject_user_id": "sample-user"},
-                    }
-                ]
-            },
-            "developer-agent": {
-                "proposals": [
-                    {
-                        "agent_name": "developer",
-                        "tool_name": "get_developer_app",
-                        "arguments": {"appid": "sample-app"},
-                    }
-                ]
-            },
-        }
-        return httpx.Response(200, json=payloads[host])
-
-    app = create_app(SupervisorSettings(subagent_db_path=tmp_path / "subagents.sqlite"))
-    _seed_legacy_subagents(app)
-    app.state.workflow_orchestrator = WorkflowOrchestrator(
-        app.state.subagent_discovery,
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+def test_auth0_session_route_requires_magnum_opus_metadata(monkeypatch) -> None:
+    response = _auth0_session_response(
+        monkeypatch,
+        user_payload={"app_metadata": {}},
     )
 
-    with TestClient(app) as client:
-        planned = client.post(
-            "/workflows/plan",
-            json={
-                "question": "Check user sample-user and app sample-app",
-                "user_id": "sample-user",
-                "session_id": "session-1",
-                "token_ref": "auth0:sample",
-                "token_scopes": ["read:workflow", "read:users", "read:apps"],
-                "allowed_tools": ["get_identity_profile"],
-            },
-        )
-
-    assert planned.status_code == 200
-    manifest = planned.json()
-    assert [step["action"] for step in manifest["plan"]["steps"]] == [
-        "propose_workflow_plan",
-        "get_identity_profile",
-    ]
-    assert manifest["events"][0]["attributes"]["filtered_proposal_count"] == 1
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Auth0 user metadata is missing app_metadata.magnum_opus"
+    }
 
 
-def test_plan_workflow_empty_allowed_tools_keeps_only_orchestration(tmp_path) -> None:
-    async def handler(request: httpx.Request) -> httpx.Response:
-        host = request.url.host or ""
-        payloads: dict[str, dict[str, Any]] = {
-            "planner-agent": {
-                "proposals": [
-                    {
-                        "agent_name": "planner",
-                        "tool_name": "propose_workflow_plan",
-                        "arguments": {"query": "Check user sample-user and app sample-app"},
-                    }
-                ]
-            },
-            "identity-agent": {
-                "proposals": [
-                    {
-                        "agent_name": "identity",
-                        "tool_name": "get_identity_profile",
-                        "arguments": {"subject_user_id": "sample-user"},
-                    }
-                ]
-            },
-            "developer-agent": {
-                "proposals": [
-                    {
-                        "agent_name": "developer",
-                        "tool_name": "get_developer_app",
-                        "arguments": {"appid": "sample-app"},
-                    }
-                ]
-            },
-        }
-        return httpx.Response(200, json=payloads[host])
-
-    app = create_app(SupervisorSettings(subagent_db_path=tmp_path / "subagents.sqlite"))
-    _seed_legacy_subagents(app)
-    app.state.workflow_orchestrator = WorkflowOrchestrator(
-        app.state.subagent_discovery,
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+def test_auth0_session_route_requires_explicit_allowed_scopes(monkeypatch) -> None:
+    response = _auth0_session_response(
+        monkeypatch,
+        user_payload={
+            "app_metadata": {
+                "magnum_opus": {
+                    "allowed_mcp_tools": ["get_identity_profile"],
+                }
+            }
+        },
     )
 
-    with TestClient(app) as client:
-        planned = client.post(
-            "/workflows/plan",
-            json={
-                "question": "Check user sample-user and app sample-app",
-                "user_id": "sample-user",
-                "session_id": "session-1",
-                "token_ref": "auth0:sample",
-                "token_scopes": ["read:workflow", "read:users", "read:apps"],
-                "allowed_tools": [],
-            },
-        )
-
-    assert planned.status_code == 200
-    manifest = planned.json()
-    assert [step["action"] for step in manifest["plan"]["steps"]] == [
-        "propose_workflow_plan"
-    ]
-    assert manifest["events"][0]["attributes"]["filtered_proposal_count"] == 2
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Auth0 user metadata field app_metadata.magnum_opus.allowed_scopes is required"
+    }
 
 
-def test_plan_workflow_rejects_unmaterializable_dynamic_scope(tmp_path) -> None:
-    async def handler(request: httpx.Request) -> httpx.Response:
-        host = request.url.host or ""
-        payloads: dict[str, dict[str, Any]] = {
-            "planner-agent": {
-                "proposals": [
-                    {
-                        "agent_name": "planner",
-                        "tool_name": "propose_workflow_plan",
-                        "arguments": {"query": "Check an app without an app id"},
-                    }
-                ]
-            },
-            "identity-agent": {"proposals": []},
-            "developer-agent": {
-                "proposals": [
-                    {
-                        "agent_name": "developer",
-                        "tool_name": "get_developer_app",
-                        "arguments": {},
-                    }
-                ]
-            },
-        }
-        return httpx.Response(200, json=payloads[host])
-
-    app = create_app(SupervisorSettings(subagent_db_path=tmp_path / "subagents.sqlite"))
-    _seed_legacy_subagents(app)
-    app.state.workflow_orchestrator = WorkflowOrchestrator(
-        app.state.subagent_discovery,
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+def test_auth0_session_route_requires_explicit_allowed_tools(monkeypatch) -> None:
+    response = _auth0_session_response(
+        monkeypatch,
+        user_payload={
+            "app_metadata": {
+                "magnum_opus": {
+                    "allowed_scopes": ["read:identity"],
+                    "allowed_mcp_tools": [],
+                }
+            }
+        },
     )
 
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Auth0 user metadata field app_metadata.magnum_opus.allowed_mcp_tools is required"
+    }
+
+
+def test_auth0_session_route_rejects_context_mismatch() -> None:
+    app = create_app(SupervisorSettings(internal_service_auth_secret="test-internal-secret"))
+
     with TestClient(app) as client:
-        planned = client.post(
-            "/workflows/plan",
+        response = client.post(
+            "/identity/auth0/session",
+            headers=_signed_context_headers(user_id="auth0|other-user"),
             json={
-                "question": "Check an app without an app id",
-                "user_id": "sample-user",
-                "session_id": "session-1",
+                "user_id": "auth0|user-1",
+                "session_id": "auth0-session-1",
                 "token_ref": "auth0:sample",
-                "token_scopes": ["read:workflow", "read:apps"],
             },
         )
 
-    assert planned.status_code == 422
-    detail = planned.json()["detail"]
-    assert "could not materialize workflow scopes for get_developer_app" in detail
-    assert "appid" in detail
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Auth0 metadata request does not match trusted session context: user_id"
+    }
 
 
-def _seed_legacy_subagents(app: Any) -> None:
-    now = datetime.now(UTC)
-    records = [
-        SubagentRecord(
-            agent_name="planner",
-            base_url="http://planner-agent:8080",
-            mcp_server_name="planner-mcp",
-            enabled=True,
-            priority=10,
-            updated_at=now,
+def test_supervisor_no_longer_exposes_legacy_workflow_routes() -> None:
+    app = create_app(SupervisorSettings())
+
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        assert client.get("/subagents").status_code == 404
+        assert client.post("/workflows/plan", json={}).status_code == 404
+
+
+async def test_sidecar_event_emission_redacts_auth0_session_materialization(
+    monkeypatch,
+) -> None:
+    store = InMemoryTelemetryStore()
+
+    class LocalSidecarClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            _ = args, kwargs
+
+        async def __aenter__(self) -> LocalSidecarClient:
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_value: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> None:
+            _ = exc_type, exc_value, traceback
+
+        async def emit_trace(self, *, source_component: str, event: object) -> None:
+            await store.append_trace(
+                AgenticTraceIngest(source_component=source_component, event=event)
+            )
+
+        async def emit_log(
+            self,
+            *,
+            source_component: str,
+            level: str,
+            message: str,
+            attributes: dict[str, object] | None = None,
+            trace_id: str | None = None,
+            agentic_span_id: str | None = None,
+        ) -> None:
+            await store.append_log(
+                LogIngest(
+                    agentic_span_id=agentic_span_id,
+                    attributes=attributes or {},
+                    level=level,
+                    message=message,
+                    source_component=source_component,
+                    trace_id=trace_id,
+                )
+            )
+
+    monkeypatch.setattr(routes, "ObservabilitySidecarClient", LocalSidecarClient)
+
+    await routes._emit_sidecar_event(
+        settings=SupervisorSettings(observability_sidecar_url="http://sidecar.test"),
+        event_type="identity.auth0_user_session_materialized",
+        user_id="auth0|user-1",
+        session_id="session-1",
+        attributes={
+            "allowed_tools": ["restart_vm"],
+            "authorization": "Bearer raw-access-token",
+            "token_ref": "auth0:token-ref-secret",
+        },
+    )
+
+    serialized = "\n".join(
+        [trace.model_dump_json() for trace in await store.traces()]
+        + [log.model_dump_json() for log in await store.logs()]
+    )
+    assert "raw-access-token" not in serialized
+    assert "auth0:token-ref-secret" not in serialized
+    assert "[REDACTED]" in serialized
+
+
+def _auth0_session_response(monkeypatch, *, user_payload: dict[str, object]) -> httpx.Response:
+    class FakeAsyncClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            _ = args, kwargs
+
+        async def __aenter__(self) -> FakeAsyncClient:
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_value: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> None:
+            _ = exc_type, exc_value, traceback
+
+        async def post(
+            self,
+            url: str,
+            data: dict[str, str],
+        ) -> httpx.Response:
+            _ = data
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", url),
+                json={"access_token": "management-token", "token_type": "Bearer"},
+            )
+
+        async def get(
+            self,
+            url: str,
+            headers: dict[str, str],
+        ) -> httpx.Response:
+            _ = headers
+            return httpx.Response(200, request=httpx.Request("GET", url), json=user_payload)
+
+    monkeypatch.setattr(routes.httpx, "AsyncClient", FakeAsyncClient)
+    app = create_app(
+        SupervisorSettings(
+            auth0_domain="samples.auth0.com",
+            auth0_audience="https://api.example.test",
+            auth0_management_client_id="management-client-id",
+            auth0_management_client_secret="management-secret",
+            internal_service_auth_secret="test-internal-secret",
+        )
+    )
+    with TestClient(app) as client:
+        return client.post(
+            "/identity/auth0/session",
+            headers=_signed_context_headers(
+                user_id="auth0|user-1",
+                session_id="auth0-session-1",
+                token_ref="auth0:sample",
+                token_scopes=["openid", "profile"],
+            ),
+            json={
+                "user_id": "auth0|user-1",
+                "user_email": "sample@example.com",
+                "user_name": "sample",
+                "session_id": "auth0-session-1",
+                "token_ref": "auth0:sample",
+                "token_scopes": ["openid", "profile"],
+                "audience": "https://api.example.test",
+            },
+        )
+
+
+def _signed_context_headers(
+    *,
+    user_id: str = "auth0|user-1",
+    session_id: str = "auth0-session-1",
+    token_ref: str = "auth0:sample",
+    token_scopes: list[str] | None = None,
+    tenant_id: str | None = None,
+) -> dict[str, str]:
+    return signed_session_context_headers(
+        TrustedSessionContext(
+            allowed_tools=[],
+            correlation_id="supervisor-test",
+            expires_at=datetime.now(UTC) + timedelta(minutes=5),
+            session_id=session_id,
+            tenant_id=tenant_id,
+            token_ref=token_ref,
+            token_scopes=token_scopes or [],
+            user_id=user_id,
         ),
-        SubagentRecord(
-            agent_name="identity",
-            base_url="http://identity-agent:8080",
-            mcp_server_name="identity-mcp",
-            enabled=True,
-            priority=20,
-            updated_at=now,
-        ),
-        SubagentRecord(
-            agent_name="developer",
-            base_url="http://developer-agent:8080",
-            mcp_server_name="developer-mcp",
-            enabled=True,
-            priority=30,
-            updated_at=now,
-        ),
-    ]
-
-    async def seed() -> None:
-        for record in records:
-            await app.state.subagent_discovery.upsert_subagent(record)
-
-    asyncio.run(seed())
+        secret="test-internal-secret",
+    )

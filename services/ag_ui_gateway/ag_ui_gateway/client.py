@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+from collections.abc import AsyncIterator
 from typing import Any, Protocol, cast
 
 import httpx
@@ -9,8 +11,12 @@ DEFAULT_AGENT_SERVICE_URL = "http://agent-service:8090"
 
 
 class AgentServiceClient(Protocol):
-    async def plan_workflow(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Return the supervisor workflow manifest for an AG-UI run."""
+    def stream_run(
+        self,
+        payload: dict[str, Any],
+        headers: dict[str, str] | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Stream Agent Runtime events for an AG-UI run."""
         ...
 
 
@@ -26,13 +32,49 @@ class HttpAgentServiceClient:
         self._http_client = http_client
         self._timeout = timeout
 
-    async def plan_workflow(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def stream_run(
+        self,
+        payload: dict[str, Any],
+        headers: dict[str, str] | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        return self._stream_run(payload, headers or {})
+
+    async def _stream_run(
+        self,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+    ) -> AsyncIterator[dict[str, Any]]:
         if self._http_client is not None:
-            response = await self._http_client.post("/workflows/plan", json=payload)
-            response.raise_for_status()
-            return cast(dict[str, Any], response.json())
+            async with self._http_client.stream(
+                "POST",
+                "/runs/stream",
+                json=payload,
+                headers=headers,
+            ) as response:
+                response.raise_for_status()
+                async for event in _iter_sse_events(response):
+                    yield event
+            return
 
         async with httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout) as client:
-            response = await client.post("/workflows/plan", json=payload)
-            response.raise_for_status()
-            return cast(dict[str, Any], response.json())
+            async with client.stream(
+                "POST",
+                "/runs/stream",
+                json=payload,
+                headers=headers,
+            ) as response:
+                response.raise_for_status()
+                async for event in _iter_sse_events(response):
+                    yield event
+
+
+async def _iter_sse_events(response: httpx.Response) -> AsyncIterator[dict[str, Any]]:
+    async for line in response.aiter_lines():
+        if not line.startswith("data:"):
+            continue
+        payload = line.removeprefix("data:").strip()
+        if not payload:
+            continue
+        decoded = json.loads(payload)
+        if isinstance(decoded, dict):
+            yield cast(dict[str, Any], decoded)
