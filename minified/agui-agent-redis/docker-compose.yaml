@@ -14,6 +14,7 @@ services:
       - build
 
   ag-ui-gateway:
+    image: ${AG_UI_GATEWAY_IMAGE:-magnum-opus-minified-agui-agent-ag-ui-gateway:local}
     build:
       <<: *backend-build
       args:
@@ -29,6 +30,7 @@ services:
         condition: service_started
 
   agent-service:
+    image: ${AGENT_SERVICE_IMAGE:-magnum-opus-minified-agui-agent-agent-service:local}
     build:
       <<: *backend-build
       args:

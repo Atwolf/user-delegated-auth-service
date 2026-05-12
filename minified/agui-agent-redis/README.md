@@ -54,6 +54,17 @@ docker compose build python-base
 docker compose up --build
 ```
 
+For Podman environments where `--secret` can be passed to `podman build` but not `podman compose build`, prebuild the two backend images with the Makefile. The Makefile passes the same service args that Compose uses and forwards the pip config as the `pip_config` build secret:
+
+```bash
+cd minified/agui-agent-redis
+make podman-build-backends \
+  PIP_CONFIG_SECRET_SRC=/path/to/pip.conf
+podman compose up --no-build
+```
+
+Override `CONTAINER_ENGINE`, `AG_UI_GATEWAY_IMAGE`, or `AGENT_SERVICE_IMAGE` if your enterprise Podman setup uses different command or image naming conventions.
+
 Optional live ADK configuration using Anthropic from an untracked `.env` file:
 
 ```bash
