@@ -30,7 +30,6 @@ export async function streamAgentRun(
     url: "/agent",
     threadId: input.threadId,
     initialMessages: [userMessage],
-    initialState: { sessionId: input.threadId },
     headers: {
       Authorization: `Bearer ${input.token}`,
       "X-User-Id": input.userId,

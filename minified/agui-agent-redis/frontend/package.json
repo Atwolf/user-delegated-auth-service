@@ -1,5 +1,5 @@
 {
-  "name": "@magnum-opus/minified-agui-client",
+  "name": "@magnum-opus/agui-agent-client",
   "version": "0.1.0",
   "private": true,
   "type": "module",
