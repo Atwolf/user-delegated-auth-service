@@ -17,12 +17,10 @@ def to_agui_input(request: AgentRunRequest, metadata: ThreadRunMetadata) -> RunA
         "threadId": metadata.thread_id,
         "sessionId": metadata.session_id,
         "agentSessionId": metadata.agent_session_id,
-        "runCount": metadata.run_count,
         "updatedAt": metadata.updated_at,
     }
     user_state = {
         "userId": request.user.user_id,
-        "tokenRef": request.user.token_ref,
         "authScheme": request.user.auth_scheme,
     }
     return RunAgentInput(
@@ -58,7 +56,7 @@ def agui_messages(request: AgentRunRequest) -> list[Message]:
     return _MESSAGES_ADAPTER.validate_python(messages)
 
 
-def thread_metadata_delta(metadata_key: str, metadata: ThreadRunMetadata) -> StateDeltaEvent:
+def thread_metadata_delta(metadata: ThreadRunMetadata) -> StateDeltaEvent:
     return StateDeltaEvent(
         type=EventType.STATE_DELTA,
         delta=[
@@ -66,11 +64,9 @@ def thread_metadata_delta(metadata_key: str, metadata: ThreadRunMetadata) -> Sta
                 "op": "add",
                 "path": "/threadMetadata",
                 "value": {
-                    "key": metadata_key,
                     "threadId": metadata.thread_id,
                     "sessionId": metadata.session_id,
                     "agentSessionId": metadata.agent_session_id,
-                    "runCount": metadata.run_count,
                     "updatedAt": metadata.updated_at,
                 },
             }

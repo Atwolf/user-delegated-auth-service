@@ -47,8 +47,8 @@ services:
       GOOGLE_GENAI_USE_VERTEXAI: ${GOOGLE_GENAI_USE_VERTEXAI:-false}
       GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
       GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-}
-    ports:
-      - "${AGENT_SERVICE_HOST_PORT:-18090}:8090"
+    expose:
+      - "8090"
     depends_on:
       redis:
         condition: service_healthy

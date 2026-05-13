@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-
 from fastapi import HTTPException, Request, status
 
 from gateway_app.schemas import UserContext
@@ -21,7 +19,7 @@ def user_context_from_request(request: Request) -> UserContext:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="X-User-Id is required for the AG-UI gateway",
         )
-    return UserContext(user_id=user_id, token_ref=f"sha256:{fingerprint(token)}")
+    return UserContext(user_id=user_id)
 
 
 def bearer_token(value: str | None) -> str | None:
@@ -31,7 +29,3 @@ def bearer_token(value: str | None) -> str | None:
     if scheme.casefold() != "bearer" or not token.strip():
         return None
     return token.strip()
-
-
-def fingerprint(value: str, *, length: int = 32) -> str:
-    return hashlib.sha256(value.encode()).hexdigest()[:length]

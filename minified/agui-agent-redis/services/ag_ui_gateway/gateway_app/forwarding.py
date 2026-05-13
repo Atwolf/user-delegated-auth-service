@@ -46,22 +46,25 @@ def agent_service_payload(payload: RunAgentInput, user_context: UserContext) -> 
         "threadId": payload.thread_id,
         "runId": payload.run_id,
         "parentRunId": payload.parent_run_id,
-        "sessionId": session_id(payload),
+        "sessionId": payload.thread_id,
         "messages": [
             message.model_dump(mode="json", by_alias=True, exclude_none=True)
             for message in payload.messages
         ],
         "tools": payload.tools,
         "context": payload.context,
-        "state": payload.state,
+        "state": state_without_client_session(payload),
         "forwardedProps": payload.forwarded_props,
         "user": user_context.model_dump(mode="json"),
     }
 
 
-def session_id(payload: RunAgentInput) -> str:
-    candidate = payload.state.get("sessionId") or payload.state.get("session_id")
-    return candidate if isinstance(candidate, str) and candidate else payload.thread_id
+def state_without_client_session(payload: RunAgentInput) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in payload.state.items()
+        if key not in {"sessionId", "session_id"}
+    }
 
 
 def agent_service_url() -> str:

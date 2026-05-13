@@ -28,25 +28,15 @@ class RedisThreadMetadataStore:
             thread_id=request.thread_id,
             prefix=self._key_prefix,
         )
-        existing = await self.get(key)
         metadata = ThreadRunMetadata(
             user_id=request.user.user_id,
             thread_id=request.thread_id,
             session_id=request.session_id,
             agent_session_id=request.session_id or request.thread_id,
-            run_count=(existing.run_count if existing else 0) + 1,
             updated_at=utc_now_iso(),
         )
         await self._redis.set(key, metadata.model_dump_json(), ex=self._ttl_seconds)
         return key, metadata
-
-    async def get(self, key: str) -> ThreadRunMetadata | None:
-        raw = await self._redis.get(key)
-        if raw is None:
-            return None
-        if isinstance(raw, bytes):
-            raw = raw.decode("utf-8")
-        return ThreadRunMetadata.model_validate_json(raw)
 
 
 def build_thread_metadata_store() -> RedisThreadMetadataStore:

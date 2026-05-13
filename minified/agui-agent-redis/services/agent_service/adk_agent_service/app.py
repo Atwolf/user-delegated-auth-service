@@ -55,8 +55,8 @@ async def run_stream(
     encoder: EventEncoder,
 ) -> AsyncIterator[str]:
     try:
-        metadata_key, metadata = await metadata_store.upsert_from_run(payload)
-        async for event in stream_adk_events(payload, metadata_key, metadata):
+        _, metadata = await metadata_store.upsert_from_run(payload)
+        async for event in stream_adk_events(payload, metadata):
             yield encoder.encode(event)
     except Exception as exc:
         yield encoder.encode(

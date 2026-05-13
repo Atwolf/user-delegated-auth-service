@@ -22,7 +22,6 @@ class UserContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     user_id: str = Field(..., min_length=1)
-    token_ref: str = Field(..., min_length=1)
     auth_scheme: str = "bearer"
 
 
@@ -54,5 +53,4 @@ class ThreadRunMetadata(BaseModel):
     thread_id: str
     session_id: str
     agent_session_id: str
-    run_count: int = 0
     updated_at: str = Field(default_factory=utc_now_iso)

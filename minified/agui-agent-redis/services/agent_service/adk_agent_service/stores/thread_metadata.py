@@ -9,8 +9,6 @@ DEFAULT_KEY_PREFIX = "agui:agent:v1"
 
 
 class RedisClientProtocol(Protocol):
-    async def get(self, key: str) -> bytes | str | None: ...
-
     async def set(self, key: str, value: str, *, ex: int | None = None) -> object: ...
 
 

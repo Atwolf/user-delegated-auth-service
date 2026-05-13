@@ -21,14 +21,13 @@ class AdkBridge(Protocol):
 
 async def stream_adk_events(
     request: AgentRunRequest,
-    metadata_key: str,
     metadata: ThreadRunMetadata,
 ) -> AsyncIterator[BaseEvent]:
     metadata_delta_sent = False
     async for event in build_adk_bridge().run(to_agui_input(request, metadata)):
         yield event
         if not metadata_delta_sent and event_type(event) == EventType.RUN_STARTED.value:
-            yield thread_metadata_delta(metadata_key, metadata)
+            yield thread_metadata_delta(metadata)
             metadata_delta_sent = True
 
 
