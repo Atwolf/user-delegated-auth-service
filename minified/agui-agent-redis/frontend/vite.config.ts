@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/agent": {
-        target: process.env.VITE_AG_UI_GATEWAY_URL ?? "http://127.0.0.1:18088",
+        target: process.env.VITE_AGENT_SERVICE_URL ?? "http://127.0.0.1:18088",
         changeOrigin: true,
       },
     },

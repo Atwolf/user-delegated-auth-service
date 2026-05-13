@@ -1635,7 +1635,6 @@ dependencies = [
     { name = "anthropic" },
     { name = "fastapi" },
     { name = "google-adk" },
-    { name = "httpx" },
     { name = "pydantic" },
     { name = "redis" },
     { name = "uvicorn", extra = ["standard"] },
@@ -1643,6 +1642,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "httpx" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
@@ -1654,7 +1654,6 @@ requires-dist = [
     { name = "anthropic", specifier = ">=0.43.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "google-adk", specifier = ">=1.32.0" },
-    { name = "httpx", specifier = ">=0.27.0" },
     { name = "pydantic", specifier = ">=2.8.0" },
     { name = "redis", specifier = ">=5.0.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
@@ -1662,6 +1661,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "httpx", specifier = ">=0.27.0" },
     { name = "pytest", specifier = ">=8.3.0" },
     { name = "pytest-asyncio", specifier = ">=0.24.0" },
     { name = "ruff", specifier = ">=0.6.0" },

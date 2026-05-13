@@ -3,22 +3,14 @@ from __future__ import annotations
 from adk_agent_service.contracts import AgentRunRequest, ThreadRunMetadata, utc_now_iso
 from adk_agent_service.stores.thread_metadata import (
     DEFAULT_KEY_PREFIX,
-    RedisClientProtocol,
     thread_metadata_key,
 )
 
 
-class RedisThreadMetadataStore:
-    def __init__(
-        self,
-        redis: RedisClientProtocol,
-        *,
-        key_prefix: str = DEFAULT_KEY_PREFIX,
-        ttl_seconds: int | None = None,
-    ) -> None:
-        self._redis = redis
+class InMemoryThreadMetadataStore:
+    def __init__(self, *, key_prefix: str = DEFAULT_KEY_PREFIX) -> None:
         self._key_prefix = key_prefix
-        self._ttl_seconds = ttl_seconds
+        self._entries: dict[str, ThreadRunMetadata] = {}
 
     async def upsert_from_run(self, request: AgentRunRequest) -> tuple[str, ThreadRunMetadata]:
         key = thread_metadata_key(
@@ -33,5 +25,5 @@ class RedisThreadMetadataStore:
             agent_session_id=request.session_id or request.thread_id,
             updated_at=utc_now_iso(),
         )
-        await self._redis.set(key, metadata.model_dump_json(), ex=self._ttl_seconds)
+        self._entries[key] = metadata
         return key, metadata

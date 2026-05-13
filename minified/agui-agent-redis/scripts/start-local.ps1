@@ -1,18 +1,17 @@
 [CmdletBinding()]
 param(
     [string]$HostAddress = "127.0.0.1",
-    [int]$GatewayPort = 18088,
-    [int]$AgentServicePort = 18090,
+    [int]$AgentServicePort = 18088,
     [int]$FrontendPort = 5173,
     [string]$RedisUrl = "redis://127.0.0.1:6379/0",
-    [switch]$SkipNpmInstall
+    [switch]$SkipNpmInstall,
+    [switch]$DisableInMemoryFallback
 )
 
 $ErrorActionPreference = "Stop"
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $FrontendRoot = Join-Path $Root "frontend"
-$LogRoot = Join-Path $Root ".local\logs"
 
 function Require-Command {
     param(
@@ -122,24 +121,37 @@ function Start-WindowsTerminalTab {
 
 Import-DotEnv -Path (Join-Path $Root ".env")
 
+if ($env:AGENT_SERVICE_HOST) {
+    $HostAddress = $env:AGENT_SERVICE_HOST
+}
+if ($env:AGENT_SERVICE_PORT) {
+    $AgentServicePort = [int]$env:AGENT_SERVICE_PORT
+}
 if (-not $env:REDIS_URL) {
     $env:REDIS_URL = $RedisUrl
 }
 if (-not $env:AGENT_SERVICE_STORE_TTL_SECONDS) {
     $env:AGENT_SERVICE_STORE_TTL_SECONDS = "86400"
 }
+if (-not $env:AGENT_SERVICE_METADATA_STORE) {
+    $env:AGENT_SERVICE_METADATA_STORE = "auto"
+}
+if (-not $env:AGENT_SERVICE_ALLOW_IN_MEMORY_FALLBACK) {
+    $env:AGENT_SERVICE_ALLOW_IN_MEMORY_FALLBACK = if ($DisableInMemoryFallback) { "false" } else { "true" }
+}
 
-Require-Command -Name "uv" -Hint "Install uv from https://docs.astral.sh/uv/ before starting the Python services."
+Require-Command -Name "uv" -Hint "Install uv from https://docs.astral.sh/uv/ before starting FastAPI."
 Require-Command -Name "npm" -Hint "Install Node.js LTS, which includes npm, before starting the React client."
 
 $redisUri = [Uri]$env:REDIS_URL
 $redisHost = if ($redisUri.Host) { $redisUri.Host } else { "127.0.0.1" }
 $redisPort = if ($redisUri.Port -gt 0) { $redisUri.Port } else { 6379 }
 
-if (-not (Test-Redis -RedisHost $redisHost -RedisPort $redisPort)) {
+$redisAvailable = Test-Redis -RedisHost $redisHost -RedisPort $redisPort
+if (-not $redisAvailable) {
     $redisServer = Get-Command redis-server -ErrorAction SilentlyContinue
     if ($redisServer) {
-        Write-Host "Starting local redis-server on ${redisHost}:${redisPort}."
+        Write-Host "Starting redis-server on ${redisHost}:${redisPort}."
         Start-Process -FilePath $redisServer.Source -ArgumentList @(
             "--bind",
             $redisHost,
@@ -151,11 +163,16 @@ if (-not (Test-Redis -RedisHost $redisHost -RedisPort $redisPort)) {
             "no"
         ) | Out-Null
         Start-Sleep -Seconds 2
+        $redisAvailable = Test-Redis -RedisHost $redisHost -RedisPort $redisPort
     }
 }
 
-if (-not (Test-Redis -RedisHost $redisHost -RedisPort $redisPort)) {
-    throw "Docker-free startup requires Redis at $env:REDIS_URL or redis-server on PATH. Start Redis first, then rerun this script."
+if (-not $redisAvailable) {
+    if ($DisableInMemoryFallback -or $env:AGENT_SERVICE_ALLOW_IN_MEMORY_FALLBACK -eq "false") {
+        throw "Startup requires Redis at $env:REDIS_URL when in-memory fallback is disabled."
+    }
+    Write-Host "Redis is unavailable; using in-memory thread metadata."
+    $env:AGENT_SERVICE_METADATA_STORE = "memory"
 }
 
 if (-not $SkipNpmInstall -and -not (Test-Path (Join-Path $FrontendRoot "node_modules"))) {
@@ -168,27 +185,19 @@ if (-not $SkipNpmInstall -and -not (Test-Path (Join-Path $FrontendRoot "node_mod
     }
 }
 
-New-Item -ItemType Directory -Path $LogRoot -Force | Out-Null
-
 $rootLiteral = Quote-ForPowerShell -Value $Root.Path
 $frontendLiteral = Quote-ForPowerShell -Value $FrontendRoot
 $agentPathLiteral = Quote-ForPowerShell -Value (Join-Path $Root "services\agent_service")
-$gatewayPathLiteral = Quote-ForPowerShell -Value (Join-Path $Root "services\ag_ui_gateway")
 $agentUrlLiteral = Quote-ForPowerShell -Value "http://${HostAddress}:${AgentServicePort}"
-$gatewayUrlLiteral = Quote-ForPowerShell -Value "http://${HostAddress}:${GatewayPort}"
 
 $agentCommand = "Set-Location $rootLiteral; `$env:PYTHONPATH = $agentPathLiteral; uv run uvicorn adk_agent_service.app:app --host $HostAddress --port $AgentServicePort"
-$gatewayCommand = "Set-Location $rootLiteral; `$env:PYTHONPATH = $gatewayPathLiteral; `$env:AGENT_SERVICE_URL = $agentUrlLiteral; uv run uvicorn gateway_app.app:app --host $HostAddress --port $GatewayPort"
-$frontendCommand = "Set-Location $frontendLiteral; `$env:VITE_AG_UI_GATEWAY_URL = $gatewayUrlLiteral; npm run dev -- --host $HostAddress --port $FrontendPort"
+$frontendCommand = "Set-Location $frontendLiteral; `$env:VITE_AGENT_SERVICE_URL = $agentUrlLiteral; npm run dev -- --host $HostAddress --port $FrontendPort"
 
 Start-WindowsTerminalTab -Title "agent-service" -Command $agentCommand
 Start-Sleep -Seconds 2
-Start-WindowsTerminalTab -Title "ag-ui-gateway" -Command $gatewayCommand
-Start-Sleep -Seconds 1
 Start-WindowsTerminalTab -Title "frontend" -Command $frontendCommand
 
-Write-Host "Started AG-UI Agent stack without Docker."
-Write-Host "Frontend: http://${HostAddress}:${FrontendPort}"
-Write-Host "Gateway:  http://${HostAddress}:${GatewayPort}"
-Write-Host "Agent:    http://${HostAddress}:${AgentServicePort}"
-Write-Host "Redis:    $env:REDIS_URL"
+Write-Host "Started AG-UI Agent app."
+Write-Host "Frontend:      http://${HostAddress}:${FrontendPort}"
+Write-Host "Agent Service: http://${HostAddress}:${AgentServicePort}"
+Write-Host "Metadata:      $env:AGENT_SERVICE_METADATA_STORE"

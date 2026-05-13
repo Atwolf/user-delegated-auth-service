@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException, Request, status
 
-from gateway_app.schemas import UserContext
+from adk_agent_service.contracts import UserContext
 
 
 def user_context_from_request(request: Request) -> UserContext:
@@ -10,14 +10,14 @@ def user_context_from_request(request: Request) -> UserContext:
     if token is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Bearer token is required for the AG-UI gateway",
+            detail="Bearer token is required for the Agent Service",
         )
 
     user_id = request.headers.get("x-user-id")
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="X-User-Id is required for the AG-UI gateway",
+            detail="X-User-Id is required for the Agent Service",
         )
     return UserContext(user_id=user_id)
 

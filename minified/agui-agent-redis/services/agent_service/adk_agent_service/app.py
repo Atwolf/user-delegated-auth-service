@@ -2,39 +2,54 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from ag_ui.core import EventType, RunErrorEvent
+from ag_ui.core import EventType, RunAgentInput, RunErrorEvent
 from ag_ui.encoder import EventEncoder
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 
+from adk_agent_service.auth import user_context_from_request
 from adk_agent_service.contracts import AgentRunRequest
+from adk_agent_service.request_normalization import agent_run_request_from_agui
 from adk_agent_service.runtime.adk_runner import stream_adk_events
 from adk_agent_service.runtime.agent import AGENT_NAME
-from adk_agent_service.stores.redis_thread_metadata import build_thread_metadata_store
+from adk_agent_service.stores.factory import build_thread_metadata_store
 from adk_agent_service.stores.thread_metadata import ThreadMetadataStore
 
 
 def create_app(metadata_store: ThreadMetadataStore | None = None) -> FastAPI:
-    app = FastAPI(title="ADK Agent Service")
+    app = FastAPI(title="AG-UI ADK Agent Service")
     app.state.metadata_store = metadata_store or build_thread_metadata_store()
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/agents")
-    async def agents() -> dict[str, object]:
+    @app.get("/agent/capabilities")
+    async def capabilities() -> dict[str, object]:
         return {
-            "agents": [
-                {
-                    "name": AGENT_NAME,
-                    "description": "Streams AG-UI events from the Google ADK runtime.",
-                },
-            ]
+            "service": "adk-agent-service",
+            "protocol": "ag-ui",
+            "agent": {
+                "name": AGENT_NAME,
+                "description": "Streams AG-UI events from the Google ADK runtime.",
+            },
+            "endpoints": ["GET /healthz", "GET /agent/capabilities", "POST /agent"],
+            "event_types": [
+                "RUN_STARTED",
+                "TEXT_MESSAGE_START",
+                "TEXT_MESSAGE_CONTENT",
+                "TEXT_MESSAGE_END",
+                "STATE_DELTA",
+                "STATE_SNAPSHOT",
+                "RUN_FINISHED",
+                "RUN_ERROR",
+            ],
         }
 
-    @app.post("/runs/stream")
-    async def run_agent(payload: AgentRunRequest, request: Request) -> StreamingResponse:
+    @app.post("/agent")
+    async def run_agent(input_data: RunAgentInput, request: Request) -> StreamingResponse:
+        user_context = user_context_from_request(request)
+        payload = agent_run_request_from_agui(input_data, user_context)
         metadata_store = request.app.state.metadata_store
         encoder = EventEncoder(accept=request.headers.get("accept", ""))
         return StreamingResponse(
