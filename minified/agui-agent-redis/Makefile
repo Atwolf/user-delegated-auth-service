@@ -9,8 +9,8 @@ PIP_CONFIG_SECRET_ID ?= pip_config
 PIP_CONFIG_SECRET_SRC ?= $(HOME)/.config/pip/pip.conf
 PIP_CONFIG_SECRET_ARG ?= --secret id=$(PIP_CONFIG_SECRET_ID),src=$(PIP_CONFIG_SECRET_SRC)
 
-AG_UI_GATEWAY_IMAGE ?= magnum-opus-minified-agui-agent-ag-ui-gateway:dev
-AGENT_SERVICE_IMAGE ?= magnum-opus-minified-agui-agent-agent-service:dev
+AG_UI_GATEWAY_IMAGE ?= magnum-opus-agui-agent-gateway:dev
+AGENT_SERVICE_IMAGE ?= magnum-opus-agui-agent-service:dev
 
 .PHONY: podman-build-python-base
 podman-build-python-base:
@@ -24,7 +24,7 @@ podman-build-ag-ui-gateway:
 	$(CONTAINER_ENGINE) build \
 		$(PIP_CONFIG_SECRET_ARG) \
 		--build-arg SERVICE_PATH=ag_ui_gateway \
-		--build-arg SERVICE_MODULE=ag_ui_gateway_simple.app \
+		--build-arg SERVICE_MODULE=gateway_app.app \
 		--build-arg SERVICE_PORT=8088 \
 		-f $(BACKEND_DOCKERFILE) \
 		-t $(AG_UI_GATEWAY_IMAGE) \
@@ -35,7 +35,7 @@ podman-build-agent-service:
 	$(CONTAINER_ENGINE) build \
 		$(PIP_CONFIG_SECRET_ARG) \
 		--build-arg SERVICE_PATH=agent_service \
-		--build-arg SERVICE_MODULE=agent_service_simple.app \
+		--build-arg SERVICE_MODULE=adk_agent_service.app \
 		--build-arg SERVICE_PORT=8090 \
 		-f $(BACKEND_DOCKERFILE) \
 		-t $(AGENT_SERVICE_IMAGE) \

@@ -47,15 +47,12 @@ class AgentRunRequest(BaseModel):
     user: UserContext
 
 
-class ThreadCacheEntry(BaseModel):
+class ThreadRunMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     user_id: str
     thread_id: str
     session_id: str
     agent_session_id: str
-    token_ref: str
-    messages: list[dict[str, Any]] = Field(default_factory=list)
-    state: dict[str, Any] = Field(default_factory=dict)
     run_count: int = 0
     updated_at: str = Field(default_factory=utc_now_iso)

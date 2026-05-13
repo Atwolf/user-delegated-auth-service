@@ -1627,7 +1627,7 @@ wheels = [
 ]
 
 [[package]]
-name = "magnum-opus-minified-agui-agent"
+name = "magnum-opus-agui-agent"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

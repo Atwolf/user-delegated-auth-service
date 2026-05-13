@@ -7,16 +7,16 @@ from ag_ui.encoder import EventEncoder
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 
-from agent_service_simple.adk_runtime import PersistentAdkRuntime
-from agent_service_simple.cache import RedisThreadCache, build_thread_cache
-from agent_service_simple.models import AgentRunRequest
+from adk_agent_service.contracts import AgentRunRequest
+from adk_agent_service.runtime.adk_runner import stream_adk_events
+from adk_agent_service.runtime.agent import AGENT_NAME
+from adk_agent_service.stores.redis_thread_metadata import build_thread_metadata_store
+from adk_agent_service.stores.thread_metadata import ThreadMetadataStore
 
-_RUNTIME = PersistentAdkRuntime()
 
-
-def create_app(cache: RedisThreadCache | None = None) -> FastAPI:
-    app = FastAPI(title="Minified Agent Service")
-    app.state.cache = cache or build_thread_cache()
+def create_app(metadata_store: ThreadMetadataStore | None = None) -> FastAPI:
+    app = FastAPI(title="ADK Agent Service")
+    app.state.metadata_store = metadata_store or build_thread_metadata_store()
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
@@ -27,7 +27,7 @@ def create_app(cache: RedisThreadCache | None = None) -> FastAPI:
         return {
             "agents": [
                 {
-                    "name": "minified_adk_agent",
+                    "name": AGENT_NAME,
                     "description": "Streams AG-UI events from the Google ADK runtime.",
                 },
             ]
@@ -35,10 +35,10 @@ def create_app(cache: RedisThreadCache | None = None) -> FastAPI:
 
     @app.post("/runs/stream")
     async def run_agent(payload: AgentRunRequest, request: Request) -> StreamingResponse:
-        cache_store = request.app.state.cache
+        metadata_store = request.app.state.metadata_store
         encoder = EventEncoder(accept=request.headers.get("accept", ""))
         return StreamingResponse(
-            _run_stream(payload, cache_store, encoder),
+            run_stream(payload, metadata_store, encoder),
             media_type=encoder.get_content_type(),
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -49,24 +49,24 @@ def create_app(cache: RedisThreadCache | None = None) -> FastAPI:
 app = create_app()
 
 
-async def _run_stream(
+async def run_stream(
     payload: AgentRunRequest,
-    cache: RedisThreadCache,
+    metadata_store: ThreadMetadataStore,
     encoder: EventEncoder,
 ) -> AsyncIterator[str]:
     try:
-        cache_key, cache_entry = await cache.upsert_from_run(payload)
-        async for event in _RUNTIME.stream_events(payload, cache_key, cache_entry):
+        metadata_key, metadata = await metadata_store.upsert_from_run(payload)
+        async for event in stream_adk_events(payload, metadata_key, metadata):
             yield encoder.encode(event)
     except Exception as exc:
         yield encoder.encode(
             RunErrorEvent(
                 type=EventType.RUN_ERROR,
-                message=_safe_error(exc),
+                message=safe_error(exc),
                 code="AGENT_SERVICE_ERROR",
             )
         )
 
 
-def _safe_error(exc: Exception) -> str:
+def safe_error(exc: Exception) -> str:
     return (str(exc) or exc.__class__.__name__).replace("\n", " ")[:240]

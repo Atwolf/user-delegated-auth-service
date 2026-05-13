@@ -177,17 +177,17 @@ $gatewayPathLiteral = Quote-ForPowerShell -Value (Join-Path $Root "services\ag_u
 $agentUrlLiteral = Quote-ForPowerShell -Value "http://${HostAddress}:${AgentServicePort}"
 $gatewayUrlLiteral = Quote-ForPowerShell -Value "http://${HostAddress}:${GatewayPort}"
 
-$agentCommand = "Set-Location $rootLiteral; `$env:PYTHONPATH = $agentPathLiteral; uv run uvicorn agent_service_simple.app:app --host $HostAddress --port $AgentServicePort"
-$gatewayCommand = "Set-Location $rootLiteral; `$env:PYTHONPATH = $gatewayPathLiteral; `$env:AGENT_SERVICE_URL = $agentUrlLiteral; uv run uvicorn ag_ui_gateway_simple.app:app --host $HostAddress --port $GatewayPort"
+$agentCommand = "Set-Location $rootLiteral; `$env:PYTHONPATH = $agentPathLiteral; uv run uvicorn adk_agent_service.app:app --host $HostAddress --port $AgentServicePort"
+$gatewayCommand = "Set-Location $rootLiteral; `$env:PYTHONPATH = $gatewayPathLiteral; `$env:AGENT_SERVICE_URL = $agentUrlLiteral; uv run uvicorn gateway_app.app:app --host $HostAddress --port $GatewayPort"
 $frontendCommand = "Set-Location $frontendLiteral; `$env:VITE_AG_UI_GATEWAY_URL = $gatewayUrlLiteral; npm run dev -- --host $HostAddress --port $FrontendPort"
 
-Start-WindowsTerminalTab -Title "minified agent-service" -Command $agentCommand
+Start-WindowsTerminalTab -Title "agent-service" -Command $agentCommand
 Start-Sleep -Seconds 2
-Start-WindowsTerminalTab -Title "minified ag-ui-gateway" -Command $gatewayCommand
+Start-WindowsTerminalTab -Title "ag-ui-gateway" -Command $gatewayCommand
 Start-Sleep -Seconds 1
-Start-WindowsTerminalTab -Title "minified frontend" -Command $frontendCommand
+Start-WindowsTerminalTab -Title "frontend" -Command $frontendCommand
 
-Write-Host "Started minified stack without Docker."
+Write-Host "Started AG-UI Agent stack without Docker."
 Write-Host "Frontend: http://${HostAddress}:${FrontendPort}"
 Write-Host "Gateway:  http://${HostAddress}:${GatewayPort}"
 Write-Host "Agent:    http://${HostAddress}:${AgentServicePort}"

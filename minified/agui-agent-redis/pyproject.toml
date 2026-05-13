@@ -1,7 +1,7 @@
 [project]
-name = "magnum-opus-minified-agui-agent"
+name = "magnum-opus-agui-agent"
 version = "0.1.0"
-description = "Minimal AG-UI gateway and ADK-backed Agent Service with Redis thread cache."
+description = "AG-UI gateway and ADK-backed Agent Service with Redis thread metadata."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -32,8 +32,8 @@ where = [
     "services/agent_service",
 ]
 include = [
-    "ag_ui_gateway_simple*",
-    "agent_service_simple*",
+    "gateway_app*",
+    "adk_agent_service*",
 ]
 
 [tool.pytest.ini_options]

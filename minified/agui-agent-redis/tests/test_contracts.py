@@ -5,6 +5,8 @@ import sys
 import types
 from typing import Any
 
+from adk_agent_service.contracts import AgentRunRequest, ThreadRunMetadata, UserContext
+from adk_agent_service.stores.thread_metadata import thread_metadata_key
 from ag_ui.core import (
     EventType,
     RunAgentInput,
@@ -15,27 +17,25 @@ from ag_ui.core import (
     TextMessageStartEvent,
 )
 from ag_ui.encoder import EventEncoder
-from ag_ui_gateway_simple.app import _bearer_token, _fingerprint
-from agent_service_simple.cache import thread_cache_key
-from agent_service_simple.models import AgentRunRequest, ThreadCacheEntry, UserContext
+from gateway_app.auth import bearer_token, fingerprint
 
 
-def test_thread_cache_key_uses_colon_namespace_and_url_encoding() -> None:
+def test_thread_metadata_key_uses_colon_namespace_and_url_encoding() -> None:
     assert (
-        thread_cache_key(user_id="user:1", thread_id="thread/1")
-        == "agui:min:v1:user:user%3A1:thread:thread%2F1"
+        thread_metadata_key(user_id="user:1", thread_id="thread/1")
+        == "agui:agent:v1:user:user%3A1:thread:thread%2F1"
     )
 
 
 def test_bearer_token_extraction_requires_bearer_scheme() -> None:
-    assert _bearer_token("Bearer abc") == "abc"
-    assert _bearer_token("Basic abc") is None
-    assert _bearer_token(None) is None
+    assert bearer_token("Bearer abc") == "abc"
+    assert bearer_token("Basic abc") is None
+    assert bearer_token(None) is None
 
 
 def test_opaque_token_fingerprint_is_stable() -> None:
-    assert _fingerprint("token") == _fingerprint("token")
-    assert _fingerprint("token") != _fingerprint("other")
+    assert fingerprint("token") == fingerprint("token")
+    assert fingerprint("token") != fingerprint("other")
 
 
 async def test_agent_service_stream_uses_adk_events_and_cache_delta(
@@ -50,10 +50,9 @@ async def test_agent_service_stream_uses_adk_events_and_cache_delta(
     monkeypatch.setitem(sys.modules, "ag_ui_adk", adk_bridge_module)
     monkeypatch.setitem(sys.modules, "google.adk.agents", adk_agents_module)
 
-    import agent_service_simple.app as agent_app
+    import adk_agent_service.app as agent_app
 
     _RecordingADKAgentBridge.instances.clear()
-    agent_app._RUNTIME._agui_adk_agent = None
 
     payload = AgentRunRequest(
         threadId="thread-001",
@@ -63,7 +62,7 @@ async def test_agent_service_stream_uses_adk_events_and_cache_delta(
             {
                 "id": "msg-001",
                 "role": "user",
-                "content": "Show me the Redis-backed thread state path.",
+                "content": "Confirm ADK streaming and show the thread metadata key.",
             }
         ],
         state={},
@@ -72,16 +71,16 @@ async def test_agent_service_stream_uses_adk_events_and_cache_delta(
 
     events = [
         _decode_sse(frame)
-        async for frame in agent_app._run_stream(
+        async for frame in agent_app.run_stream(
             payload,
-            _MemoryCache(),
+            _MemoryMetadataStore(),
             EventEncoder(),
         )
     ]
 
     assert len(_RecordingADKAgentBridge.instances) == 1
     assert _RecordingADKAgentBridge.instances[0].kwargs["adk_agent"].kwargs["name"] == (
-        "minified_adk_agent"
+        "agui_adk_agent"
     )
     assert [event["type"] for event in events][:3] == [
         "RUN_STARTED",
@@ -117,7 +116,7 @@ class _RecordingADKAgentBridge:
         self.instances.append(self)
 
     async def run(self, input_data: RunAgentInput):
-        assert input_data.state["cache"]["threadId"] == "thread-001"
+        assert input_data.state["threadMetadata"]["threadId"] == "thread-001"
         assert input_data.state["user"]["userId"] == "user-001"
         message_id = "adk-message"
         yield RunStartedEvent(
@@ -148,16 +147,15 @@ class _RecordingADKAgentBridge:
         )
 
 
-class _MemoryCache:
-    async def upsert_from_run(self, payload: AgentRunRequest) -> tuple[str, ThreadCacheEntry]:
+class _MemoryMetadataStore:
+    async def upsert_from_run(self, payload: AgentRunRequest) -> tuple[str, ThreadRunMetadata]:
         return (
-            "cache-key",
-            ThreadCacheEntry(
+            "metadata-key",
+            ThreadRunMetadata(
                 user_id=payload.user.user_id,
                 thread_id=payload.thread_id,
                 session_id=payload.session_id,
                 agent_session_id="agent-session",
-                token_ref=payload.user.token_ref,
                 run_count=1,
             ),
         )

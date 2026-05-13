@@ -1,4 +1,4 @@
-name: magnum-opus-minified-agui-agent
+name: magnum-opus-agui-agent
 
 x-backend-build: &backend-build
   context: .
@@ -14,12 +14,12 @@ services:
       - build
 
   ag-ui-gateway:
-    image: ${AG_UI_GATEWAY_IMAGE:-magnum-opus-minified-agui-agent-ag-ui-gateway:dev}
+    image: ${AG_UI_GATEWAY_IMAGE:-magnum-opus-agui-agent-gateway:dev}
     build:
       <<: *backend-build
       args:
         SERVICE_PATH: ag_ui_gateway
-        SERVICE_MODULE: ag_ui_gateway_simple.app
+        SERVICE_MODULE: gateway_app.app
         SERVICE_PORT: "8088"
     environment:
       AGENT_SERVICE_URL: http://agent-service:8090
@@ -30,12 +30,12 @@ services:
         condition: service_started
 
   agent-service:
-    image: ${AGENT_SERVICE_IMAGE:-magnum-opus-minified-agui-agent-agent-service:dev}
+    image: ${AGENT_SERVICE_IMAGE:-magnum-opus-agui-agent-service:dev}
     build:
       <<: *backend-build
       args:
         SERVICE_PATH: agent_service
-        SERVICE_MODULE: agent_service_simple.app
+        SERVICE_MODULE: adk_agent_service.app
         SERVICE_PORT: "8090"
     environment:
       REDIS_URL: redis://redis:6379/0
