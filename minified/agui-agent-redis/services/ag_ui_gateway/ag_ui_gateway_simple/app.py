@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import os
@@ -141,11 +140,12 @@ def _user_context_from_request(request: Request) -> UserContext:
             detail="Bearer token is required for the minified gateway",
         )
 
-    user_id = (
-        request.headers.get("x-user-id")
-        or _claim_from_unverified_jwt(token, ("sub", "uid", "user_id"))
-        or f"opaque:{_fingerprint(token, length=16)}"
-    )
+    user_id = request.headers.get("x-user-id")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="X-User-Id is required for the minified gateway",
+        )
     return UserContext(user_id=user_id, token_ref=f"sha256:{_fingerprint(token)}")
 
 
@@ -156,24 +156,6 @@ def _bearer_token(value: str | None) -> str | None:
     if scheme.casefold() != "bearer" or not token.strip():
         return None
     return token.strip()
-
-
-def _claim_from_unverified_jwt(token: str, claim_names: tuple[str, ...]) -> str | None:
-    parts = token.split(".")
-    if len(parts) < 2:
-        return None
-    try:
-        payload = parts[1] + "=" * (-len(parts[1]) % 4)
-        decoded = json.loads(base64.urlsafe_b64decode(payload.encode()).decode())
-    except Exception:
-        return None
-    if not isinstance(decoded, dict):
-        return None
-    for claim_name in claim_names:
-        value = decoded.get(claim_name)
-        if isinstance(value, str) and value:
-            return value
-    return None
 
 
 def _session_id(payload: RunAgentInput) -> str:

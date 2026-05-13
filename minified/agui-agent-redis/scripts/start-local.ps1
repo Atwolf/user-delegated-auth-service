@@ -125,9 +125,6 @@ Import-DotEnv -Path (Join-Path $Root ".env")
 if (-not $env:REDIS_URL) {
     $env:REDIS_URL = $RedisUrl
 }
-if (-not $env:AGENT_SERVICE_RUNTIME_MODE) {
-    $env:AGENT_SERVICE_RUNTIME_MODE = "auto"
-}
 if (-not $env:AGENT_SERVICE_STORE_TTL_SECONDS) {
     $env:AGENT_SERVICE_STORE_TTL_SECONDS = "86400"
 }

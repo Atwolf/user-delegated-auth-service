@@ -9,8 +9,8 @@ PIP_CONFIG_SECRET_ID ?= pip_config
 PIP_CONFIG_SECRET_SRC ?= $(HOME)/.config/pip/pip.conf
 PIP_CONFIG_SECRET_ARG ?= --secret id=$(PIP_CONFIG_SECRET_ID),src=$(PIP_CONFIG_SECRET_SRC)
 
-AG_UI_GATEWAY_IMAGE ?= magnum-opus-minified-agui-agent-ag-ui-gateway:local
-AGENT_SERVICE_IMAGE ?= magnum-opus-minified-agui-agent-agent-service:local
+AG_UI_GATEWAY_IMAGE ?= magnum-opus-minified-agui-agent-ag-ui-gateway:dev
+AGENT_SERVICE_IMAGE ?= magnum-opus-minified-agui-agent-agent-service:dev
 
 .PHONY: podman-build-python-base
 podman-build-python-base:

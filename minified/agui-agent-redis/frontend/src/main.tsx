@@ -18,7 +18,7 @@ declare global {
 function App() {
   const [userId, setUserId] = useState("demo-user");
   const [threadId, setThreadId] = useState("thread-001");
-  const [token, setToken] = useState("local-demo-token");
+  const [token, setToken] = useState("demo-token");
   const [prompt, setPrompt] = useState("Show me the Redis-backed thread state path.");
   const [messages, setMessages] = useState<Message[]>([]);
   const [events, setEvents] = useState<AgUiEvent[]>([]);

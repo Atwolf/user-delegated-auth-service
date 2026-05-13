@@ -59,11 +59,3 @@ class ThreadCacheEntry(BaseModel):
     state: dict[str, Any] = Field(default_factory=dict)
     run_count: int = 0
     updated_at: str = Field(default_factory=utc_now_iso)
-
-
-class RuntimeResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    text: str
-    routed_agent: str
-    runtime_mode: str

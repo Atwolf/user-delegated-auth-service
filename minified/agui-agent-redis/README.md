@@ -15,7 +15,7 @@ flowchart LR
     Agui -->|"SSE AG-UI events"| Client
 ```
 
-The gateway treats the incoming bearer value as opaque. It does not validate, introspect, or store the raw token. For this minified flow it derives a stable `user_id` from `X-User-Id`, an unverified JWT identity claim when present, or a token fingerprint fallback. The forwarded `token_ref` is always a SHA-256 fingerprint.
+The gateway treats the incoming bearer value as opaque. It does not validate, introspect, or store the raw token. For this minified flow it requires `X-User-Id` and forwards only that user id plus a SHA-256 `token_ref`.
 
 The Agent Service owns the Redis cache and the agent runtime boundary. Redis keys use the conventional colon-separated namespace shape:
 
@@ -27,21 +27,13 @@ Each cache entry is a single JSON document with `user_id`, `thread_id`, `session
 
 ## Runtime Contract
 
-The Agent Service constructs one `PersistentAdkRuntime` per FastAPI process. That runtime keeps a process-local coordinator and stateful subagent instances alive across requests. When live ADK credentials are configured, it delegates AG-UI event translation to the official `ag_ui_adk.ADKAgent` middleware; otherwise it runs a deterministic local dispatcher that emits the same typed AG-UI event classes through `ag_ui.encoder.EventEncoder`. `ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL` are read only by the Agent Service process.
-
-The coordinator/dispatcher pattern is intentionally simple:
-
-- The coordinator receives only sanitized request context and cached thread state.
-- The dispatcher routes each turn to one long-lived specialist process object.
-- Redis is the cross-process cache of thread state; ADK session state is the in-process execution substrate owned by `ADKAgent`.
-- The AG-UI event stream remains the public UI contract: `RUN_STARTED`, `TEXT_MESSAGE_START`, `TEXT_MESSAGE_CONTENT`, `TEXT_MESSAGE_END`, `STATE_DELTA`, and `RUN_FINISHED` or `RUN_ERROR`.
+The Agent Service constructs one `PersistentAdkRuntime` per FastAPI process. That runtime has one execution path: build an AG-UI `RunAgentInput`, invoke `ag_ui_adk.ADKAgent`, and encode the resulting AG-UI events with `ag_ui.encoder.EventEncoder`. Redis is only the cross-process thread cache; ADK is the only agent execution substrate. `ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL` are read only by the Agent Service process.
 
 Research inputs used for this shape:
 
 - AG-UI documents `HttpAgent` and `AgentSubscriber` as the client-side HTTP/SSE and event-subscription abstraction.
 - AG-UI Python documents typed streaming events and `EventEncoder` as the server-side event encoding boundary.
 - `ag_ui_adk` documents `ADKAgent.run(...)` and FastAPI integration as the Google ADK bridge for AG-UI events.
-- ADK documents coordinator/dispatcher as a central coordinator routing to specialized sub-agents.
 - Redis documents colon-delimited key conventions and `SET` options such as expiration.
 
 ## Run
@@ -65,11 +57,10 @@ podman compose up --no-build
 
 Override `CONTAINER_ENGINE`, `AG_UI_GATEWAY_IMAGE`, or `AGENT_SERVICE_IMAGE` if your enterprise Podman setup uses different command or image naming conventions.
 
-Optional live ADK configuration using Anthropic from an untracked `.env` file:
+Optional ADK model configuration using Anthropic from an untracked `.env` file:
 
 ```bash
 cp ../../.env .env
-export AGENT_SERVICE_RUNTIME_MODE=auto
 docker compose up --build
 ```
 
@@ -78,7 +69,7 @@ Local smoke request:
 ```bash
 curl -N http://127.0.0.1:18088/agent \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer local-demo-token' \
+  -H 'Authorization: Bearer demo-token' \
   -H 'X-User-Id: demo-user' \
   -d '{
     "threadId": "thread-001",

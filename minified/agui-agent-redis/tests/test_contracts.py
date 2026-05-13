@@ -1,11 +1,21 @@
 from __future__ import annotations
 
 import json
+import sys
+import types
 from typing import Any
 
+from ag_ui.core import (
+    EventType,
+    RunAgentInput,
+    RunFinishedEvent,
+    RunStartedEvent,
+    TextMessageContentEvent,
+    TextMessageEndEvent,
+    TextMessageStartEvent,
+)
 from ag_ui.encoder import EventEncoder
-from ag_ui_gateway_simple.app import _bearer_token, _claim_from_unverified_jwt, _fingerprint
-from agent_service_simple.adk_runtime import PersistentAdkRuntime
+from ag_ui_gateway_simple.app import _bearer_token, _fingerprint
 from agent_service_simple.cache import thread_cache_key
 from agent_service_simple.models import AgentRunRequest, ThreadCacheEntry, UserContext
 
@@ -28,18 +38,22 @@ def test_opaque_token_fingerprint_is_stable() -> None:
     assert _fingerprint("token") != _fingerprint("other")
 
 
-def test_unverified_jwt_claim_extraction_is_best_effort() -> None:
-    token = "header.eyJzdWIiOiAidXNlci0xIn0.signature"
-    assert _claim_from_unverified_jwt(token, ("sub",)) == "user-1"
-    assert _claim_from_unverified_jwt("not-a-jwt", ("sub",)) is None
-
-
-async def test_agent_service_stream_uses_agui_events_and_chunked_content(
+async def test_agent_service_stream_uses_adk_events_and_cache_delta(
     monkeypatch,
 ) -> None:
-    monkeypatch.setenv("AGENT_SERVICE_RUNTIME_MODE", "local")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
-    from agent_service_simple.app import _run_stream
+    adk_bridge_module = types.ModuleType("ag_ui_adk")
+    adk_bridge_module.ADKAgent = _RecordingADKAgentBridge
+    adk_agents_module = types.ModuleType("google.adk.agents")
+    adk_agents_module.Agent = _RecordingGoogleAgent
+    monkeypatch.setitem(sys.modules, "ag_ui_adk", adk_bridge_module)
+    monkeypatch.setitem(sys.modules, "google.adk.agents", adk_agents_module)
+
+    import agent_service_simple.app as agent_app
+
+    _RecordingADKAgentBridge.instances.clear()
+    agent_app._RUNTIME._agui_adk_agent = None
 
     payload = AgentRunRequest(
         threadId="thread-001",
@@ -58,14 +72,17 @@ async def test_agent_service_stream_uses_agui_events_and_chunked_content(
 
     events = [
         _decode_sse(frame)
-        async for frame in _run_stream(
+        async for frame in agent_app._run_stream(
             payload,
-            _FakeCache(),
-            PersistentAdkRuntime(),
+            _MemoryCache(),
             EventEncoder(),
         )
     ]
 
+    assert len(_RecordingADKAgentBridge.instances) == 1
+    assert _RecordingADKAgentBridge.instances[0].kwargs["adk_agent"].kwargs["name"] == (
+        "minified_adk_agent"
+    )
     assert [event["type"] for event in events][:3] == [
         "RUN_STARTED",
         "STATE_DELTA",
@@ -75,12 +92,63 @@ async def test_agent_service_stream_uses_agui_events_and_chunked_content(
         "TEXT_MESSAGE_END",
         "RUN_FINISHED",
     ]
-    assert sum(event["type"] == "TEXT_MESSAGE_CONTENT" for event in events) > 1
+    assert sum(event["type"] == "TEXT_MESSAGE_CONTENT" for event in events) == 2
     state_delta = next(event for event in events if event["type"] == "STATE_DELTA")
-    assert state_delta["delta"][0]["value"]["key"] == "cache-key"
+    assert set(state_delta["delta"][0]["value"]) == {
+        "agentSessionId",
+        "key",
+        "runCount",
+        "sessionId",
+        "threadId",
+        "updatedAt",
+    }
 
 
-class _FakeCache:
+class _RecordingGoogleAgent:
+    def __init__(self, **kwargs: object) -> None:
+        self.kwargs = kwargs
+
+
+class _RecordingADKAgentBridge:
+    instances: list[_RecordingADKAgentBridge] = []
+
+    def __init__(self, **kwargs: object) -> None:
+        self.kwargs = kwargs
+        self.instances.append(self)
+
+    async def run(self, input_data: RunAgentInput):
+        assert input_data.state["cache"]["threadId"] == "thread-001"
+        assert input_data.state["user"]["userId"] == "user-001"
+        message_id = "adk-message"
+        yield RunStartedEvent(
+            type=EventType.RUN_STARTED,
+            thread_id=input_data.thread_id,
+            run_id=input_data.run_id,
+        )
+        yield TextMessageStartEvent(
+            type=EventType.TEXT_MESSAGE_START,
+            message_id=message_id,
+            role="assistant",
+        )
+        yield TextMessageContentEvent(
+            type=EventType.TEXT_MESSAGE_CONTENT,
+            message_id=message_id,
+            delta="chunk one ",
+        )
+        yield TextMessageContentEvent(
+            type=EventType.TEXT_MESSAGE_CONTENT,
+            message_id=message_id,
+            delta="chunk two",
+        )
+        yield TextMessageEndEvent(type=EventType.TEXT_MESSAGE_END, message_id=message_id)
+        yield RunFinishedEvent(
+            type=EventType.RUN_FINISHED,
+            thread_id=input_data.thread_id,
+            run_id=input_data.run_id,
+        )
+
+
+class _MemoryCache:
     async def upsert_from_run(self, payload: AgentRunRequest) -> tuple[str, ThreadCacheEntry]:
         return (
             "cache-key",

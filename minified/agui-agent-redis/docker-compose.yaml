@@ -14,7 +14,7 @@ services:
       - build
 
   ag-ui-gateway:
-    image: ${AG_UI_GATEWAY_IMAGE:-magnum-opus-minified-agui-agent-ag-ui-gateway:local}
+    image: ${AG_UI_GATEWAY_IMAGE:-magnum-opus-minified-agui-agent-ag-ui-gateway:dev}
     build:
       <<: *backend-build
       args:
@@ -30,7 +30,7 @@ services:
         condition: service_started
 
   agent-service:
-    image: ${AGENT_SERVICE_IMAGE:-magnum-opus-minified-agui-agent-agent-service:local}
+    image: ${AGENT_SERVICE_IMAGE:-magnum-opus-minified-agui-agent-agent-service:dev}
     build:
       <<: *backend-build
       args:
@@ -39,7 +39,6 @@ services:
         SERVICE_PORT: "8090"
     environment:
       REDIS_URL: redis://redis:6379/0
-      AGENT_SERVICE_RUNTIME_MODE: ${AGENT_SERVICE_RUNTIME_MODE:-auto}
       AGENT_SERVICE_STORE_TTL_SECONDS: ${AGENT_SERVICE_STORE_TTL_SECONDS:-86400}
       GOOGLE_ADK_MODEL: ${GOOGLE_ADK_MODEL:-gemini-flash-latest}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-20250514}
